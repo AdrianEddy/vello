@@ -136,10 +136,10 @@ glifo = { version = "0.3.0", path = "glifo", default-features = false }
 vello_example_scenes = { path = "sparse_strips/vello_example_scenes" }
 vello_dev_macros = { path = "sparse_strips/vello_dev_macros" }
 
-# NOTE: The wgpu and naga versions should be kept in sync, and make sure to keep this
-# in sync with the version badge in README.md and vello/README.md
-wgpu = { version = "29.0.3", default-features = false, features = ["std", "wgsl"] }
-naga = { version = "29.0.3", default-features = false }
+# Keep the wgpu and naga versions in sync, and update the version badges in
+# README.md and vello/README.md when bumping them.
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
+naga = { version = "30", default-features = false }
 log = "0.4.29"
 image = { version = "0.25.10", default-features = false }
 
@@ -148,7 +148,9 @@ clap = "4.6.1"
 anyhow = "1.0.102"
 pollster = "0.4.0"
 web-time = "1.1.0"
-wgpu-profiler = "0.27.0"
+# TODO: Switch back to a crates.io release once wgpu-profiler publishes wgpu 30 support.
+# https://github.com/Wumpf/wgpu-profiler/pull/109
+wgpu-profiler = { git = "https://github.com/akx/wgpu-profiler", rev = "6b5992b3fa8627a2516e13aee564b2421b93df91" }
 winit = "0.30.13"
 scenes = { path = "examples/scenes" }
 svg = "0.18.0"

@@ -1122,6 +1122,7 @@ fn glyph_atlas_explicit_maintenance_survives_many_renders_per_frame() {
         power_preference: wgpu::PowerPreference::default(),
         force_fallback_adapter: false,
         compatible_surface: None,
+        apply_limit_buckets: false,
     }))
     .expect("Failed to find an appropriate adapter");
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -1246,6 +1247,7 @@ fn glyph_atlas_explicit_maintenance_survives_many_renders_per_frame() {
         let pixels = buffer
             .slice(..)
             .get_mapped_range()
+            .unwrap()
             .chunks_exact(bytes_per_row as usize)
             .flat_map(|row| &row[0..usize::from(WIDTH) * 4])
             .copied()

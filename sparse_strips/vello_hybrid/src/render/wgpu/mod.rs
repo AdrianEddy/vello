@@ -1553,11 +1553,11 @@ impl Programs {
 
         let depth_format = wgpu::TextureFormat::Depth24Plus;
 
-        let strip_vertex_state = wgpu::VertexBufferLayout {
+        let strip_vertex_state = Some(wgpu::VertexBufferLayout {
             array_stride: size_of::<GpuStrip>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &GpuStrip::vertex_attributes(),
-        };
+        });
 
         let create_strip_pipeline =
             |label, format, blend, depth_stencil: Option<wgpu::DepthStencilState>| {
@@ -1637,7 +1637,7 @@ impl Programs {
             alpha: clear_blend_component,
         });
 
-        let clear_vertex_state = wgpu::VertexBufferLayout {
+        let clear_vertex_state = Some(wgpu::VertexBufferLayout {
             array_stride: size_of::<GpuClearInstance>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![
@@ -1645,7 +1645,7 @@ impl Programs {
                 1 => Uint32x2,
                 2 => Uint32x2,
             ],
-        };
+        });
         let create_clear_pipeline = |label, format| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
@@ -1784,7 +1784,7 @@ impl Programs {
             vertex: wgpu::VertexState {
                 module: &filter_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[wgpu::VertexBufferLayout {
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: size_of::<FilterInstanceData>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
@@ -1798,7 +1798,7 @@ impl Programs {
                         7 => Uint32,
                         8 => Uint32,
                     ],
-                }],
+                })],
                 compilation_options: PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -1891,7 +1891,7 @@ impl Programs {
             bind_group_layouts: &[Some(&copy_bind_group_layout)],
             immediate_size: 0,
         });
-        let blend_vertex_state = wgpu::VertexBufferLayout {
+        let blend_vertex_state = Some(wgpu::VertexBufferLayout {
             array_stride: size_of::<GpuBlendInstance>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![
@@ -1904,8 +1904,8 @@ impl Programs {
                 6 => Uint32,
                 7 => Uint32,
             ],
-        };
-        let copy_vertex_state = wgpu::VertexBufferLayout {
+        });
+        let copy_vertex_state = Some(wgpu::VertexBufferLayout {
             array_stride: size_of::<GpuCopyInstance>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![
@@ -1914,12 +1914,12 @@ impl Programs {
                 2 => Uint32,
                 3 => Uint32,
             ],
-        };
+        });
         let create_texture_op_pipeline =
             |label,
              shader_module: &wgpu::ShaderModule,
              layout,
-             vertex_state: &wgpu::VertexBufferLayout<'_>| {
+             vertex_state: &Option<wgpu::VertexBufferLayout<'_>>| {
                 device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some(label),
                     layout: Some(layout),
