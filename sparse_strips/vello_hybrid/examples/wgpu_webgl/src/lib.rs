@@ -85,6 +85,7 @@ impl RendererWrapper {
             alpha_mode: wgpu::CompositeAlphaMode::Opaque,
             desired_maximum_frame_latency: 2,
             view_formats: vec![],
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
         surface.configure(&device, &surface_config);
 
@@ -124,6 +125,7 @@ impl RendererWrapper {
             alpha_mode: wgpu::CompositeAlphaMode::Opaque,
             desired_maximum_frame_latency: 2,
             view_formats: vec![],
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
         self.surface.configure(&self.device, &surface_config);
     }
@@ -226,7 +228,7 @@ impl AppState {
             .unwrap();
 
         self.renderer_wrapper.queue.submit([encoder.finish()]);
-        surface_texture.present();
+        self.renderer_wrapper.queue.present(surface_texture);
 
         self.need_render = false;
     }
@@ -648,5 +650,5 @@ pub async fn render_scene(scene: Scene, width: u16, height: u16) {
         .unwrap();
 
     queue.submit([encoder.finish()]);
-    surface_texture.present();
+    queue.present(surface_texture);
 }

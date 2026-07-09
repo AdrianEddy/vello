@@ -1316,11 +1316,11 @@ impl Programs {
         let depth_format = wgpu::TextureFormat::Depth24Plus;
         let strip_formats = [render_target_config.format, wgpu::TextureFormat::Rgba8Unorm];
 
-        let strip_vertex_state = wgpu::VertexBufferLayout {
+        let strip_vertex_state = Some(wgpu::VertexBufferLayout {
             array_stride: size_of::<GpuStrip>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &GpuStrip::vertex_attributes(),
-        };
+        });
 
         let create_strip_pipelines =
             |label, blend, depth_stencil: Option<wgpu::DepthStencilState>| -> [RenderPipeline; 2] {
@@ -1386,7 +1386,7 @@ impl Programs {
             vertex: wgpu::VertexState {
                 module: &clear_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[wgpu::VertexBufferLayout {
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: size_of::<u32>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &[wgpu::VertexAttribute {
@@ -1394,7 +1394,7 @@ impl Programs {
                         offset: 0,
                         shader_location: 0,
                     }],
-                }],
+                })],
                 compilation_options: PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -1520,7 +1520,7 @@ impl Programs {
             vertex: wgpu::VertexState {
                 module: &filter_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[wgpu::VertexBufferLayout {
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: size_of::<FilterInstanceData>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
@@ -1534,7 +1534,7 @@ impl Programs {
                         7 => Uint32x2,
                         8 => Uint32,
                     ],
-                }],
+                })],
                 compilation_options: PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {

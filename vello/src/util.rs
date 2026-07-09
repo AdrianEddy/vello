@@ -95,6 +95,7 @@ impl RenderContext {
             desired_maximum_frame_latency: 2,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
         let (target_texture, target_view) = create_targets(width, height, &device_handle.device);
         let surface = RenderSurface {

@@ -342,7 +342,14 @@ impl WgpuEngine {
             vertex: wgpu::VertexState {
                 module,
                 entry_point: Some(vertex_main),
-                buffers: vertex_buffer.as_slice(),
+                // wgpu 30: `VertexState.buffers` is `&[Option<VertexBufferLayout>]`.
+                // Preserve the old `Option::as_slice()` cardinality: one slot
+                // when a layout is present, zero slots otherwise.
+                buffers: if vertex_buffer.is_some() {
+                    core::slice::from_ref(&vertex_buffer)
+                } else {
+                    &[]
+                },
                 compilation_options: PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
