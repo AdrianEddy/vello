@@ -51,7 +51,7 @@ use crate::{
 };
 use alloc::vec::Vec;
 use alloc::{sync::Arc, vec};
-use core::{fmt::Debug, mem, num::NonZeroU64};
+use core::{fmt::Debug, mem, num::NonZeroU64, ops::Range};
 #[cfg(feature = "text")]
 use glifo::PendingClearRect;
 use hashbrown::{HashMap, hash_map::Entry};
@@ -425,6 +425,7 @@ impl Renderer {
         texture_bindings: &TextureBindings,
     ) -> Result<(), RenderError> {
         self.programs.depth_cleared_this_frame = false;
+        self.programs.resources.clear_instances_offset = 0;
         self.prepare_gpu_encoded_paints(encoded_paints, image_cache, texture_bindings)?;
         let required_texture_size = self
             .layers_config
@@ -958,6 +959,16 @@ struct Programs {
 struct GpuResources {
     /// Buffer for [`GpuStrip`] data
     strips_buffer: Buffer,
+    /// Persistent vertex buffer for [`GpuClearInstance`] data, reused across
+    /// rect-clear passes instead of allocating a fresh buffer per pass.
+    ///
+    /// Staged with `queue.write_buffer`, which is only applied on submit, so
+    /// each pass binds its own disjoint range (see
+    /// [`Programs::stage_clear_instances`]).
+    clear_instances_buffer: Buffer,
+    /// Byte offset one past the last staged clear instance. Reset at the start
+    /// of every render.
+    clear_instances_offset: u64,
     /// Alpha texture.
     alphas_texture: Texture,
     /// Textures for atlas data (multiple atlases supported)
@@ -1705,6 +1716,8 @@ impl Programs {
 
         let resources = GpuResources {
             strips_buffer: Self::create_strips_buffer(device, 0),
+            clear_instances_buffer: Self::create_clear_instances_buffer(device, 0),
+            clear_instances_offset: 0,
             layer_textures,
             scratch_texture,
             filter_original_bind_group,
@@ -1796,6 +1809,43 @@ impl Programs {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         })
+    }
+
+    fn create_clear_instances_buffer(device: &Device, size: u64) -> Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Clear Instances Buffer"),
+            size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    }
+
+    /// Stages clear-instance bytes into the persistent clear vertex buffer,
+    /// returning the byte range to bind.
+    ///
+    /// `queue.write_buffer` uploads are only applied on submit, so each clear
+    /// pass of a render appends to its own disjoint range instead of
+    /// overwriting a shared one; the append cursor is reset once per render.
+    /// When the staged total outgrows the buffer, a larger one replaces it
+    /// (passes already recorded keep the old buffer alive until submit).
+    fn stage_clear_instances(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        contents: &[u8],
+    ) -> Range<u64> {
+        let len = contents.len() as u64;
+        let resources = &mut self.resources;
+        let required = resources.clear_instances_offset + len;
+        if required > resources.clear_instances_buffer.size() {
+            resources.clear_instances_buffer =
+                Self::create_clear_instances_buffer(device, required.next_power_of_two());
+            resources.clear_instances_offset = 0;
+        }
+        let start = resources.clear_instances_offset;
+        queue.write_buffer(&resources.clear_instances_buffer, start, contents);
+        resources.clear_instances_offset = start + len;
+        start..start + len
     }
 
     fn create_intermediate_texture(
@@ -3129,13 +3179,13 @@ impl RendererContext<'_> {
             return;
         };
 
-        let view = match target {
-            DrawPassTarget::Root(_) => self.view,
-            DrawPassTarget::Layer(target) => self.programs.resources.layer_view(target),
-        };
         let rects = match settings {
             ClearSettings::DontClear => unreachable!(),
             ClearSettings::Viewport { .. } => {
+                let view = match target {
+                    DrawPassTarget::Root(_) => self.view,
+                    DrawPassTarget::Layer(target) => self.programs.resources.layer_view(target),
+                };
                 Self::clear_full_target(self.encoder, view, color);
 
                 return;
@@ -3143,20 +3193,14 @@ impl RendererContext<'_> {
             ClearSettings::Rects { rects, .. } => rects,
         };
 
-        let (target_size, pipeline) = match target {
-            DrawPassTarget::Root(_) => (
-                [
-                    u16::try_from(self.programs.render_size.width).unwrap(),
-                    u16::try_from(self.programs.render_size.height).unwrap(),
-                ],
-                &self.programs.root_clear_pipeline,
-            ),
+        let target_size = match target {
+            DrawPassTarget::Root(_) => [
+                u16::try_from(self.programs.render_size.width).unwrap(),
+                u16::try_from(self.programs.render_size.height).unwrap(),
+            ],
             DrawPassTarget::Layer(_) => {
                 let texture_size = self.texture_size();
-                (
-                    [texture_size.width(), texture_size.height()],
-                    &self.programs.clear_pipeline,
-                )
+                [texture_size.width(), texture_size.height()]
             }
         };
         let bounds = RectU16::new(0, 0, target_size[0], target_size[1]);
@@ -3178,13 +3222,18 @@ impl RendererContext<'_> {
             return;
         }
 
-        let clear_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Clear Buffer"),
-                contents: bytemuck::cast_slice(&self.scratch_buffers.clear_instances),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+        let instance_range = self.programs.stage_clear_instances(
+            self.device,
+            self.queue,
+            bytemuck::cast_slice(&self.scratch_buffers.clear_instances),
+        );
+        let (view, pipeline) = match target {
+            DrawPassTarget::Root(_) => (self.view, &self.programs.root_clear_pipeline),
+            DrawPassTarget::Layer(target) => (
+                self.programs.resources.layer_view(target),
+                &self.programs.clear_pipeline,
+            ),
+        };
         let mut render_pass = self.encoder.begin_render_pass(&RenderPassDescriptor {
             label: Some("Clear Rects"),
             color_attachments: &[Some(RenderPassColorAttachment {
@@ -3203,7 +3252,13 @@ impl RendererContext<'_> {
         });
         render_pass.set_pipeline(pipeline);
         render_pass.set_blend_constant(color);
-        render_pass.set_vertex_buffer(0, clear_buffer.slice(..));
+        render_pass.set_vertex_buffer(
+            0,
+            self.programs
+                .resources
+                .clear_instances_buffer
+                .slice(instance_range),
+        );
         render_pass.draw(
             0..4,
             0..u32::try_from(self.scratch_buffers.clear_instances.len()).unwrap(),
