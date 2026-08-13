@@ -14,6 +14,7 @@ This release has an [MSRV][] of 1.88.
 
 ### Added
 
+- Partial (damage-region) rendering: `Renderer::render` takes a `RenderRegion` that confines root drawing to a set of damage rects (overlapping rects are normalized internally into a disjoint union, so content is composited exactly once). Pixels outside the rects are preserved byte-exact, pixels inside are byte-identical to a full render, and root strips entirely outside the rects are culled before reaching the GPU. `Renderer::partial_renders`/`Renderer::culled_strips` report engagement. ([#1737][] by [@AdrianEddy][])
 - `Scene::set_glyph_coverage_contrast` for applying a `CoverageContrast` to outline glyph coverage, whether the glyph is atlas-cached (the packed tint mode word carries the strengths in bits 8-23) or drawn directly from its outline (coverage is remapped CPU-side at strip generation). ([#1790][] by [@AdrianEddy][])
 - `Renderer::reset_atlas_textures` to rebuild the atlas texture array (e.g. after a memory-pressure resource rebuild), plus `Resources::image_cache`/`image_cache_mut` and `Scene::transform` accessors for driving `render_to_atlas` from external code. ([#1739][] by [@AdrianEddy][])
 - `Renderer::render_to_atlas` takes a `clear_rect: Option<RectU16>` that clears the destination slot to transparent before compositing (for reused slots whose stale pixels would otherwise show through source-over), recorded after the atlas grows and before the scene render. ([#1739][] by [@AdrianEddy][])
@@ -304,6 +305,7 @@ See also the [vello_cpu 0.0.4](../vello_cpu/CHANGELOG.md#004---2025-10-17) and [
 [#1726]: https://github.com/linebender/vello/pull/1726
 [#1734]: https://github.com/linebender/vello/pull/1734
 [#1735]: https://github.com/linebender/vello/pull/1735
+[#1737]: https://github.com/linebender/vello/pull/1737
 [#1739]: https://github.com/linebender/vello/pull/1739
 [#1747]: https://github.com/linebender/vello/pull/1747
 [#1750]: https://github.com/linebender/vello/pull/1750

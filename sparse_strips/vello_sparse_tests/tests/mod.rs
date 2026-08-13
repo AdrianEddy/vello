@@ -49,6 +49,7 @@ mod layer;
 mod mask;
 mod mix;
 mod opacity;
+mod partial_render;
 mod rect_parity;
 mod renderer;
 mod scenes;

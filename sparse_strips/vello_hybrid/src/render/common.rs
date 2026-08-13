@@ -69,6 +69,28 @@ impl Default for ClearSettings<'_> {
     }
 }
 
+/// Controls where drawing happens: the whole target, or only a damage region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RenderRegion<'a> {
+    /// Draw the whole target.
+    #[default]
+    Full,
+    /// Confine drawing to these device-pixel rectangles.
+    ///
+    /// Pixels outside the rectangles are left untouched, and pixels inside them come out
+    /// byte-identical to a [`Full`](Self::Full) render of the same scene. Rectangles are
+    /// clamped to the target; a set that is empty (or clamps entirely away) draws nothing.
+    /// Overlapping rectangles are normalized internally into a disjoint union, so content
+    /// in an overlap is still composited exactly once; pass pairwise-disjoint rectangles
+    /// to skip the normalization.
+    ///
+    /// Note that clearing is separate: [`ClearSettings::Viewport`] still clears the whole
+    /// target. Damage-region rendering typically pairs this with
+    /// [`ClearSettings::DontClear`] (when the scene repaints the region opaquely) or
+    /// [`ClearSettings::Rects`] over the same rectangles.
+    Rects(&'a [RectU16]),
+}
+
 /// Texture limits reported by the rendering device.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DeviceLimits {

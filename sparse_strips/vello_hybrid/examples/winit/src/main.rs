@@ -402,6 +402,7 @@ impl ApplicationHandler for App<'_> {
                         Some(depth_texture_view),
                         &texture_bindings,
                         vello_hybrid::ClearSettings::default(),
+                        vello_hybrid::RenderRegion::Full,
                     )
                     .unwrap();
 

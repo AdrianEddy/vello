@@ -1201,6 +1201,7 @@ fn glyph_atlas_explicit_maintenance_survives_many_renders_per_frame() {
                     None,
                     &texture_bindings,
                     vello_hybrid::ClearSettings::default(),
+                    vello_hybrid::RenderRegion::Full,
                 )
                 .unwrap();
             queue.submit([encoder.finish()]);
