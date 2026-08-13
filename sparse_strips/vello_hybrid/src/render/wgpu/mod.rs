@@ -3566,18 +3566,20 @@ impl RendererContext<'_> {
         };
         let bounds = RectU16::new(0, 0, target_size[0], target_size[1]);
         let target_size = target_size.map(u32::from);
+        let mut scissor = RectU16::INVERTED;
         self.scratch_buffers.clear_instances.clear();
-        self.scratch_buffers.clear_instances.extend(
-            rects
-                .iter()
-                .map(|rect| rect.intersect(bounds))
-                .filter(|rect| !rect.is_empty())
-                .map(|rect| GpuClearInstance {
-                    origin: [u32::from(rect.x0), u32::from(rect.y0)],
-                    size: [u32::from(rect.width()), u32::from(rect.height())],
-                    target_size,
-                }),
-        );
+        for rect in rects
+            .iter()
+            .map(|rect| rect.intersect(bounds))
+            .filter(|rect| !rect.is_empty())
+        {
+            scissor.union(rect);
+            self.scratch_buffers.clear_instances.push(GpuClearInstance {
+                origin: [u32::from(rect.x0), u32::from(rect.y0)],
+                size: [u32::from(rect.width()), u32::from(rect.height())],
+                target_size,
+            });
+        }
 
         if self.scratch_buffers.clear_instances.is_empty() {
             return;
@@ -3611,6 +3613,15 @@ impl RendererContext<'_> {
             timestamp_writes: None,
             multiview_mask: None,
         });
+        // Scissor to the union of the clear rects. The quads never cover
+        // pixels outside it, so this is behavior-neutral; it lets tile-based
+        // GPUs skip loading/storing every tile the clear does not touch.
+        render_pass.set_scissor_rect(
+            u32::from(scissor.x0),
+            u32::from(scissor.y0),
+            u32::from(scissor.width()),
+            u32::from(scissor.height()),
+        );
         render_pass.set_pipeline(pipeline);
         render_pass.set_blend_constant(color);
         render_pass.set_vertex_buffer(
