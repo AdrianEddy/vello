@@ -24,6 +24,7 @@ This release has an [MSRV][] of 1.88.
 ### Fixed
 
 - `Renderer::destroy_image` now defers retiring the slot until the start of the next `render` call, where the freed region is cleared via `queue.write_texture`. This keeps an already-encoded (but not yet submitted) render sampling the image intact, and orders the clear before any re-upload into the reused region. ([#1739][] by [@AdrianEddy][])
+- Rectangles drawn through the GPU rect fast path now produce exactly the same bytes as the CPU strip path. The two rasterizers used to round anti-aliased coverage differently (up to one alpha step at fractional edges and corners, more at large coordinates), so pushing a clip (which routes rects through strips) changed pixels the clip didn't even touch. ([#1784][] by [@AdrianEddy][])
 
 ## [0.2.0][] - 2026-08-07
 
@@ -312,6 +313,7 @@ See also the [vello_cpu 0.0.4](../vello_cpu/CHANGELOG.md#004---2025-10-17) and [
 [#1778]: https://github.com/linebender/vello/pull/1778
 [#1779]: https://github.com/linebender/vello/pull/1779
 [#1781]: https://github.com/linebender/vello/pull/1781
+[#1784]: https://github.com/linebender/vello/pull/1784
 [#1791]: https://github.com/linebender/vello/pull/1791
 [#1792]: https://github.com/linebender/vello/pull/1792
 [#1794]: https://github.com/linebender/vello/pull/1794
