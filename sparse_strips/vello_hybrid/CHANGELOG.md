@@ -14,6 +14,7 @@ This release has an [MSRV][] of 1.88.
 
 ### Added
 
+- `Scene::set_glyph_coverage_contrast` for applying a `CoverageContrast` to outline glyph coverage, whether the glyph is atlas-cached (the packed tint mode word carries the strengths in bits 8-23) or drawn directly from its outline (coverage is remapped CPU-side at strip generation). ([#1790][] by [@AdrianEddy][])
 - `Renderer::reset_atlas_textures` to rebuild the atlas texture array (e.g. after a memory-pressure resource rebuild), plus `Resources::image_cache`/`image_cache_mut` and `Scene::transform` accessors for driving `render_to_atlas` from external code. ([#1739][] by [@AdrianEddy][])
 - `Renderer::render_to_atlas` takes a `clear_rect: Option<RectU16>` that clears the destination slot to transparent before compositing (for reused slots whose stale pixels would otherwise show through source-over), recorded after the atlas grows and before the scene render. ([#1739][] by [@AdrianEddy][])
 
@@ -316,6 +317,7 @@ See also the [vello_cpu 0.0.4](../vello_cpu/CHANGELOG.md#004---2025-10-17) and [
 [#1781]: https://github.com/linebender/vello/pull/1781
 [#1784]: https://github.com/linebender/vello/pull/1784
 [#1788]: https://github.com/linebender/vello/pull/1788
+[#1790]: https://github.com/linebender/vello/pull/1790
 [#1791]: https://github.com/linebender/vello/pull/1791
 [#1792]: https://github.com/linebender/vello/pull/1792
 [#1794]: https://github.com/linebender/vello/pull/1794

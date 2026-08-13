@@ -10,7 +10,7 @@ use crate::color::{ColorSpaceTag, HueDirection, Srgb, gradient};
 use crate::geometry::RectU16;
 use crate::kurbo::{Affine, Point, Vec2};
 use crate::math::{FloatExt, compute_erf7};
-use crate::paint::{Image, ImageSource, IndexedPaint, Paint, PremulColor, Tint, TintMode};
+use crate::paint::{CoverageContrast, Image, ImageSource, IndexedPaint, Paint, PremulColor, Tint, TintMode};
 use crate::peniko::{ColorStop, ColorStops, Extend, Gradient, GradientKind, ImageQuality};
 use crate::util::f32_to_u8;
 use alloc::borrow::Cow;
@@ -502,11 +502,13 @@ impl EncodeExt for Image {
                     Tint {
                         color: peniko::Color::new([r, g, b, ta * a]),
                         mode: t.mode,
+                        contrast: t.contrast,
                     }
                 }
                 None => Tint {
                     color: peniko::Color::new([1.0, 1.0, 1.0, a]),
                     mode: TintMode::Multiply,
+                    contrast: CoverageContrast::NONE,
                 },
             });
             sampler.alpha = 1.0;
@@ -1406,7 +1408,7 @@ mod tests {
     // Image `sampler.alpha` → tint fold (regression tests for the former
     // `unimplemented!("Applying opacity to image commands")` panic).
 
-    use crate::paint::{Image, ImageId, ImageSource, Tint, TintMode};
+    use crate::paint::{CoverageContrast, Image, ImageId, ImageSource, Tint, TintMode};
     use peniko::{Color, Extend, ImageQuality, ImageSampler};
 
     fn dummy_image(alpha: f32) -> Image {
@@ -1435,6 +1437,7 @@ mod tests {
         let tint = Some(Tint {
             color: Color::new([0.5, 0.25, 0.75, 0.8]),
             mode: TintMode::AlphaMask,
+            contrast: CoverageContrast::NONE,
         });
         img.encode_into(&mut buf, Affine::IDENTITY, tint);
 
@@ -1467,6 +1470,7 @@ mod tests {
             let tint = Some(Tint {
                 color: Color::new([0.2, 0.4, 0.6, 0.8]),
                 mode,
+                contrast: CoverageContrast::NONE,
             });
             img.encode_into(&mut buf, Affine::IDENTITY, tint);
 
