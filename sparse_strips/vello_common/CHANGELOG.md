@@ -16,6 +16,7 @@ This release has an [MSRV][] of 1.88.
 
 - Public helpers in `rect` (`pixel_coverage`, `coverage_to_u8`, `corner_coverage_u8`, `combine_coverage_u8`) exposing the strip renderer's exact rectangle coverage quantization, so other rasterizers can reproduce its bytes. ([#1784][] by [@AdrianEddy][])
 - `CoverageContrast`, an opt-in coverage transfer for alpha-mask tints that sharpens glyph edges: a symmetric edge-steepening term plus a luminance-resolved weight term. `StripGenerator::generate_filled_path_with_coverage_transfer` applies the same transfer to generated coverage, for glyphs filled directly from their outlines. ([#1790][] by [@AdrianEddy][])
+- `ClipState::push_clip_rect`: axis-aligned rectangle clips without the path machinery — the mask comes from the rect strip renderer, and rectangles on integer device coordinates are tracked exactly (`ClipContext::is_int_rect_clip`/`effective_int_rect_set`), so consumers can clamp content to the clip instead of intersecting with a mask. Rectangle clip paths pushed through `push_clip` are detected too. ([#1786][] by [@AdrianEddy][])
 
 ### Changed
 
@@ -321,6 +322,7 @@ See also the [vello_cpu 0.0.1](../vello_cpu/CHANGELOG.md#001---2025-05-10) relea
 [#1778]: https://github.com/linebender/vello/pull/1778
 [#1779]: https://github.com/linebender/vello/pull/1779
 [#1784]: https://github.com/linebender/vello/pull/1784
+[#1786]: https://github.com/linebender/vello/pull/1786
 [#1790]: https://github.com/linebender/vello/pull/1790
 [#1801]: https://github.com/linebender/vello/pull/1801
 
