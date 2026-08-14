@@ -894,7 +894,6 @@ impl Renderer {
         }
     }
 
-
     /// Zero a region of the atlas via `queue.write_texture`, staying ordered
     /// with `write_texture`-based uploads within a submit (unlike
     /// [`Self::clear_atlas_region`], which records a render pass).

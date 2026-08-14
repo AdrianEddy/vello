@@ -10,7 +10,9 @@ use crate::color::{ColorSpaceTag, HueDirection, Srgb, gradient};
 use crate::geometry::RectU16;
 use crate::kurbo::{Affine, Point, Vec2};
 use crate::math::{FloatExt, compute_erf7};
-use crate::paint::{CoverageContrast, Image, ImageSource, IndexedPaint, Paint, PremulColor, Tint, TintMode};
+use crate::paint::{
+    CoverageContrast, Image, ImageSource, IndexedPaint, Paint, PremulColor, Tint, TintMode,
+};
 use crate::peniko::{ColorStop, ColorStops, Extend, Gradient, GradientKind, ImageQuality};
 use crate::util::f32_to_u8;
 use alloc::borrow::Cow;

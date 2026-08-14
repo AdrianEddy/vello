@@ -1338,7 +1338,8 @@ fn destroyed_image_survives_already_encoded_render() {
 
     const SIZE: u16 = 16;
 
-    let mut h = HybridRenderer::new_with_settings(SIZE, SIZE, HybridRenderSettings::default(), true);
+    let mut h =
+        HybridRenderer::new_with_settings(SIZE, SIZE, HybridRenderSettings::default(), true);
 
     let mut pixmap = Pixmap::new(4, 4);
     pixmap.data_mut().fill(RED.premultiply().to_rgba8());
