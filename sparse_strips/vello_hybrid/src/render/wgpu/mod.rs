@@ -894,34 +894,6 @@ impl Renderer {
         }
     }
 
-    /// Drop the atlas texture array and recreate it fresh at the placeholder
-    /// (unallocated) state.
-    ///
-    /// Call this whenever the CPU-side [`Resources`] are rebuilt (e.g. on
-    /// memory pressure): the GPU texture array only ever grows and would keep
-    /// the dropped allocator's pixels. Content is composited into the atlas
-    /// with `SrcOver` assuming a freshly allocated slot is transparent, so
-    /// stale pixels would double-blend anti-aliased edges. The recreated
-    /// placeholder is zero-initialised, and the next frame grows it back as
-    /// needed via `maybe_resize_atlas_texture_array` (which skips the
-    /// stale-layer copy while promoting the placeholder).
-    ///
-    /// Destroys still pending from [`destroy_image`](Self::destroy_image) are
-    /// dropped: their `ImageId`s belong to the discarded allocator, and the
-    /// recreated texture has no stale content to clear.
-    pub fn reset_atlas_textures(&mut self, device: &Device) {
-        self.pending_image_destroys.clear();
-        let (texture, view) = Programs::create_atlas_texture_array(device, 1, 1, 1);
-        self.programs.resources.atlas_bind_group = Programs::create_paint_source_bind_group(
-            device,
-            &self.programs.atlas_bind_group_layout,
-            &view,
-            &self.programs.resources.placeholder_external_texture_view,
-        );
-        self.programs.resources.atlas_texture_array = texture;
-        self.programs.resources.atlas_texture_array_view = view;
-        self.programs.resources.atlas_layer_count = 0;
-    }
 
     /// Zero a region of the atlas via `queue.write_texture`, staying ordered
     /// with `write_texture`-based uploads within a submit (unlike
