@@ -129,7 +129,7 @@ impl Resources {
         Ok(())
     }
 
-    pub(crate) fn after_render<T, E>(
+    pub(crate) fn maintain_glyphs<T, E>(
         &mut self,
         backend: &mut T,
         mut clear_region: impl FnMut(&mut T, AtlasId, RectU16) -> Result<(), E>,

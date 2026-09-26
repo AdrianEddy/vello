@@ -3,14 +3,17 @@
 
 //! Persistent renderer resources shared across frames.
 
+use crate::RenderSettings;
 #[cfg(feature = "text")]
 use crate::text::GlyphAtlasResources;
 use alloc::vec::Vec;
 #[cfg(feature = "text")]
 use glifo::GlyphPrepCache;
+#[cfg(feature = "text")]
+use vello_common::GlyphMaintenance;
 use vello_common::geometry::RectU16;
 use vello_common::image_cache::ImageCache;
-use vello_common::multi_atlas::{AtlasConfig, AtlasId};
+use vello_common::multi_atlas::AtlasId;
 use vello_common::paint::ImageId;
 
 /// Persistent resources required by Vello GPU for rendering.
@@ -25,18 +28,22 @@ pub struct Resources {
     pub(crate) glyph_prep_cache: GlyphPrepCache,
     #[cfg(feature = "text")]
     pub(crate) glyph_resources: Option<GlyphAtlasResources>,
+    #[cfg(feature = "text")]
+    pub(crate) glyph_maintenance: GlyphMaintenance,
 }
 
 impl Resources {
-    pub(crate) fn new(image_atlas_config: AtlasConfig) -> Self {
+    pub(crate) fn new(settings: &RenderSettings) -> Self {
         Self {
-            image_cache: ImageCache::new_with_config(image_atlas_config),
+            image_cache: ImageCache::new_with_config(settings.memory_settings.image_atlas_config),
             destroyed_images: Vec::new(),
             #[cfg(feature = "text")]
             glyph_prep_cache: GlyphPrepCache::default(),
             // Will be initialized lazily.
             #[cfg(feature = "text")]
             glyph_resources: None,
+            #[cfg(feature = "text")]
+            glyph_maintenance: settings.glyph_maintenance,
         }
     }
 
