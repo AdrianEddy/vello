@@ -274,7 +274,8 @@ fn render_region_gpu_exact_root_clip_rect() {
     });
 }
 
-/// A confined viewport clear stores the same value as a load-op clear, also on a float target.
+/// A confined viewport clear matches a load-op clear on a float target, to within one half-float
+/// step: the two conversions from `f32` may round differently.
 #[cfg(not(all(target_arch = "wasm32", feature = "webgl")))]
 #[test]
 fn render_region_gpu_exact_float_clear() {
@@ -303,11 +304,14 @@ fn render_region_gpu_exact_float_clear() {
         let x = u16::try_from(index % 100).unwrap();
         let y = u16::try_from(index / 100).unwrap();
         let inside = REGION.iter().any(|rect| rect.contains(x, y));
-        let expected = if inside {
-            unconfined
-        } else {
-            &[0; BYTES_PER_PIXEL]
-        };
-        assert_eq!(confined, expected, "pixel ({x}, {y})");
+        if !inside {
+            assert_eq!(confined, [0; BYTES_PER_PIXEL], "pixel ({x}, {y})");
+            continue;
+        }
+        for (c, u) in confined.chunks_exact(2).zip(unconfined.chunks_exact(2)) {
+            let c = u16::from_le_bytes([c[0], c[1]]);
+            let u = u16::from_le_bytes([u[0], u[1]]);
+            assert!(c.abs_diff(u) <= 1, "pixel ({x}, {y}): {c:#06x} vs {u:#06x}");
+        }
     }
 }
