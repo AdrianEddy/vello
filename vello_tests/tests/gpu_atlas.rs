@@ -14,8 +14,8 @@ use vello_common::paint::{Image, ImageId, ImageSource};
 use vello_common::peniko::ImageSampler;
 use vello_common::pixmap::Pixmap;
 use vello_gpu::{
-    ClearSettings, MemorySettings, RenderSettings, RenderSize, RenderTargetConfig, Renderer,
-    Resources, Scene, TargetInit, TextureBindings,
+    ClearSettings, MemorySettings, RenderRegion, RenderSettings, RenderSize, RenderTargetConfig,
+    Renderer, Resources, Scene, TargetInit, TextureBindings,
 };
 use vello_tests::renderer::{lock_wgpu_tests, read_rgba8_texture, wgpu_device_queue};
 
@@ -126,6 +126,7 @@ impl Ctx {
                 TargetInit::Clear(ClearSettings::Viewport {
                     color: AlphaColor::TRANSPARENT,
                 }),
+                RenderRegion::Viewport,
             )
             .unwrap();
     }
