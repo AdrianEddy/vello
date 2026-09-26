@@ -41,6 +41,7 @@ mod glyph;
 #[cfg(not(target_arch = "wasm32"))]
 mod gpu_atlas;
 mod gpu_depth;
+mod gpu_rect_parity;
 mod gpu_schedule;
 mod gradient;
 mod image;
