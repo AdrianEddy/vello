@@ -25,7 +25,7 @@ use peniko::color::{AlphaColor, Srgb};
 use vello_common::geometry::RectU16;
 use vello_common::kurbo::{Affine, BezPath, Rect};
 use vello_common::multi_atlas::AtlasConfig;
-use vello_common::paint::{Image, ImageSource, PaintType};
+use vello_common::paint::{CoverageContrast, Image, ImageSource, PaintType};
 use vello_common::peniko;
 
 /// Glyph atlas cache for the GPU renderer.
@@ -341,6 +341,11 @@ impl glifo::GlyphRenderer for Scene {
     #[inline]
     fn set_tint(&mut self, tint: Option<vello_common::paint::Tint>) {
         Self::set_tint(self, tint);
+    }
+
+    #[inline]
+    fn fill_glyph_path(&mut self, path: &BezPath, contrast: CoverageContrast) {
+        self.fill_path_with_contrast(path, contrast);
     }
 
     #[inline]
