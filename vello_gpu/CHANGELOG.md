@@ -18,6 +18,7 @@ This release has an [MSRV][] of 1.89.
 - Support for `FilterPrimitive::ColorMatrix`, behind the new `filter_color_matrix` shader feature (part of `all_shader_features`). ([#1765][] by [@AdrianEddy][], [@waywardmonkeys][])
 - `Renderer::render_to_image` and `WebGlRenderer::render_to_image`, which render a scene into a new atlas image. (by [@AdrianEddy][])
 - `Resources::atlas_allocation_count`. (by [@AdrianEddy][])
+- `Scene::transform`, as `RenderContext::transform` in Vello CPU. (by [@AdrianEddy][])
 
 ### Changed
 
