@@ -6,6 +6,7 @@
 fn main() {
     let features = [
         "blurred_rounded_rect",
+        "filter_color_matrix",
         "full_image_support",
         "gradient_sweep",
     ];
@@ -20,7 +21,7 @@ fn main() {
         .collect::<Vec<_>>();
     let name = match enabled.len() {
         0 => "none".to_owned(),
-        3 => "all".to_owned(),
+        4 => "all".to_owned(),
         _ => enabled.join("_"),
     };
     println!("cargo:rustc-env=PROBE_SNAPSHOT_NAME=feature_tests_probe_{name}");

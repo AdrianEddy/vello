@@ -18,8 +18,9 @@ generated GLSL shader programs, used by the Vello GPU renderer.
   [naga](https://github.com/gfx-rs/wgpu/tree/trunk/naga) to minify the resulting
   WGSL.
 - Optional generation of minified GLSL and reflection metadata for WebGL.
-- The `blurred_rounded_rect`, `full_image_support`, and `gradient_sweep` features are
-  enabled by default and include their respective shader paths.
+- The `blurred_rounded_rect`, `filter_color_matrix`, `full_image_support`, and
+  `gradient_sweep` features are enabled by default and include their respective
+  shader paths.
 - The `wgpu_external_texture` feature (enabled by default) additionally embeds a
   WGSL variant of the render shader with a `texture_external` binding for
   `wgpu::ExternalTexture`s. The generated GLSL never includes it.

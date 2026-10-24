@@ -32,3 +32,33 @@ fn feature_tests_probe_webgl() {
     let actual = support::webgl::render(&elements);
     support::check_snapshot(actual, "webgl", 3, false);
 }
+
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "filter_color_matrix")))]
+mod filter_color_matrix_disabled {
+    use vello_common::filter_effects::{Filter, FilterPrimitive, matrices};
+    use vello_gpu::Scene;
+
+    fn color_matrix() -> Filter {
+        Filter::from_primitive(FilterPrimitive::ColorMatrix {
+            matrix: matrices::SEPIA,
+        })
+    }
+
+    #[test]
+    #[should_panic(expected = "color matrix filters require the `filter_color_matrix` feature")]
+    fn push_layer_panics() {
+        Scene::new(8, 8).push_layer(None, None, None, None, Some(color_matrix()));
+    }
+
+    #[test]
+    #[should_panic(expected = "color matrix filters require the `filter_color_matrix` feature")]
+    fn push_filter_layer_panics() {
+        Scene::new(8, 8).push_filter_layer(color_matrix());
+    }
+
+    #[test]
+    #[should_panic(expected = "color matrix filters require the `filter_color_matrix` feature")]
+    fn set_filter_effect_panics() {
+        Scene::new(8, 8).set_filter_effect(color_matrix());
+    }
+}

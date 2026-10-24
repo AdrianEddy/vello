@@ -3,7 +3,7 @@
 Compares the supported elements of the common probe scene against PNG references on WGPU
 and WebGL, with depth buffering enabled.
 
-`run.sh` tests five combinations: no optional shader features, each feature alone, and all
+`run.sh` tests six combinations: no optional shader features, each feature alone, and all
 features together.
 
 ```sh

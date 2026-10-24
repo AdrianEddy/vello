@@ -48,6 +48,7 @@ pub const ALL_PROBE_ELEMENTS: &[ProbeFeature] = &[
     ProbeFeature::RadialGradient,
     ProbeFeature::SweepGradient,
     ProbeFeature::ImageBicubic,
+    ProbeFeature::ColorMatrix,
 ];
 
 /// Per-channel absolute tolerance used when comparing probe pixels.
@@ -106,6 +107,8 @@ pub enum ProbeFeature {
     SweepGradient,
     /// Drawing an image with bicubic sampling.
     ImageBicubic,
+    /// Applying a color matrix filter.
+    ColorMatrix,
 }
 
 /// Summary of the differences between one expected and actual probe cell.
@@ -260,6 +263,7 @@ fn reference_data(feature: ProbeFeature) -> &'static [u8; CELL_DATA_LEN] {
         ProbeFeature::RadialGradient => include_bytes!("../assets/probe_radial_gradient.rgba"),
         ProbeFeature::SweepGradient => include_bytes!("../assets/probe_sweep_gradient.rgba"),
         ProbeFeature::ImageBicubic => include_bytes!("../assets/probe_image_bicubic.rgba"),
+        ProbeFeature::ColorMatrix => include_bytes!("../assets/probe_color_matrix.rgba"),
     }
 }
 
@@ -445,6 +449,9 @@ fn draw_probe_element(
             ctx.fill_rect(&rect);
             ctx.reset_paint_transform();
         }
+        ProbeFeature::ColorMatrix => {
+            draw_color_matrix_rect(ctx, centered_rect(cell, 10.0, 10.0));
+        }
     }
 }
 
@@ -506,6 +513,22 @@ fn draw_drop_shadow_rect(ctx: &mut impl ProbeRenderer, cell: Rect) {
     });
     ctx.push_filter_layer(shadow);
     ctx.set_paint(css::BLUE.into());
+    ctx.fill_rect(&rect);
+    ctx.pop_layer();
+}
+
+fn draw_color_matrix_rect(ctx: &mut impl ProbeRenderer, rect: Rect) {
+    // Rotates the color channels and adds an offset, which needs the unpremultiplied color.
+    let filter = Filter::from_primitive(FilterPrimitive::ColorMatrix {
+        matrix: [
+            0.0, 1.0, 0.0, 0.0, 0.2, //
+            0.0, 0.0, 1.0, 0.0, 0.0, //
+            1.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0, 0.0,
+        ],
+    });
+    ctx.push_filter_layer(filter);
+    ctx.set_paint(css::REBECCA_PURPLE.with_alpha(0.6).into());
     ctx.fill_rect(&rect);
     ctx.pop_layer();
 }

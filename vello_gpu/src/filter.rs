@@ -8,6 +8,7 @@ use crate::schedule::round::FilterOp;
 use crate::util::pack_u16_pair;
 use alloc::vec::Vec;
 use bytemuck::{Pod, Zeroable};
+use vello_common::filter::color_matrix::ColorMatrix;
 use vello_common::filter::drop_shadow::DropShadow;
 use vello_common::filter::flood::Flood;
 use vello_common::filter::gaussian_blur::{DecimationSizer, GaussianBlur, MAX_KERNEL_SIZE};
@@ -50,12 +51,17 @@ const _: () = assert!(
     size_of::<GpuDropShadow>() == 3 * BYTES_PER_TEXEL,
     "drop shadow filters must span three texels"
 );
+const _: () = assert!(
+    size_of::<GpuColorMatrix>() == 6 * BYTES_PER_TEXEL,
+    "color matrix filters must span six texels"
+);
 
 pub(crate) mod filter_type {
     pub(crate) const OFFSET: u32 = 0;
     pub(crate) const FLOOD: u32 = 1;
     pub(crate) const GAUSSIAN_BLUR: u32 = 2;
     pub(crate) const DROP_SHADOW: u32 = 3;
+    pub(crate) const COLOR_MATRIX: u32 = 4;
 }
 
 pub(crate) mod edge_mode {
@@ -75,6 +81,7 @@ pub(crate) mod pass_kind {
     pub(crate) const UPSCALE: u32 = 6;
     pub(crate) const COMPOSITE_DROP_SHADOW: u32 = 7;
     pub(crate) const COLORIZE: u32 = 8;
+    pub(crate) const COLOR_MATRIX: u32 = 9;
 }
 
 pub(crate) fn edge_mode_to_gpu(mode: EdgeMode) -> u32 {
@@ -296,6 +303,29 @@ impl From<&DropShadow> for GpuDropShadow {
     }
 }
 
+#[repr(C, align(16))]
+#[derive(Debug, Clone, Copy, PartialEq, Zeroable, Pod)]
+pub(crate) struct GpuColorMatrix {
+    pub header: u32,
+    pub _padding: [u32; 3],
+    /// The weights of the input channels, one output channel per texel.
+    pub weights: [[f32; 4]; 4],
+    pub offsets: [f32; 4],
+}
+
+impl From<&ColorMatrix> for GpuColorMatrix {
+    fn from(color_matrix: &ColorMatrix) -> Self {
+        let matrix = &color_matrix.matrix;
+
+        Self {
+            header: pack_header(filter_type::COLOR_MATRIX),
+            _padding: [0; 3],
+            weights: core::array::from_fn(|row| core::array::from_fn(|col| matrix[row * 5 + col])),
+            offsets: core::array::from_fn(|row| matrix[row * 5 + 4]),
+        }
+    }
+}
+
 /// The packed header that every encoded filter starts with, see `filter.wesl` for its layout.
 #[derive(Debug, Clone, Copy, Zeroable)]
 pub(crate) struct GpuFilterHeader(u32);
@@ -406,6 +436,9 @@ impl FilterPassPlan {
                     } else {
                         builder.emit(pass_kind::COLORIZE);
                     }
+                }
+                filter_type::COLOR_MATRIX => {
+                    builder.emit(pass_kind::COLOR_MATRIX);
                 }
                 _ => unreachable!("unsupported filter type was encoded"),
             }
@@ -582,6 +615,7 @@ impl FilterContext {
             PreparedFilter::Flood(f) => self.encode(&GpuFlood::from(f)),
             PreparedFilter::GaussianBlur(f) => self.encode(&GpuGaussianBlur::from(f)),
             PreparedFilter::DropShadow(f) => self.encode(&GpuDropShadow::from(f)),
+            PreparedFilter::ColorMatrix(f) => self.encode(&GpuColorMatrix::from(f)),
         }
     }
 
@@ -649,6 +683,7 @@ mod tests {
     use crate::target::{LayerTextureId, TextureParity, TextureRegion};
     use vello_common::color::AlphaColor;
     use vello_common::filter::gaussian_blur::{compute_gaussian_kernel, plan_decimated_blur};
+    use vello_common::filter_effects::matrices;
 
     fn region(parity: TextureParity) -> TextureRegion {
         TextureRegion {
@@ -690,6 +725,10 @@ mod tests {
         ))
     }
 
+    fn color_matrix() -> GpuColorMatrix {
+        GpuColorMatrix::from(&ColorMatrix::new(matrices::SEPIA))
+    }
+
     fn offset_header() -> GpuFilterHeader {
         GpuFilterHeader(offset().header)
     }
@@ -704,6 +743,10 @@ mod tests {
 
     fn shadow_header() -> GpuFilterHeader {
         GpuFilterHeader(shadow().header)
+    }
+
+    fn color_matrix_header() -> GpuFilterHeader {
+        GpuFilterHeader(color_matrix().header)
     }
 
     /// Read the filter of type `T` that starts at texel `offset` of serialized filter data.
@@ -727,21 +770,26 @@ mod tests {
             context.encode(&offset()).data_offset,
             context.encode(&blur(2.0)).data_offset,
             context.encode(&shadow()).data_offset,
+            context.encode(&color_matrix()).data_offset,
             context.encode(&flood()).data_offset,
         ];
-        assert_eq!(offsets, [0, 1, 3, 6]);
+        assert_eq!(offsets, [0, 1, 3, 6, 12]);
 
         // With four texels per row, the drop shadow starts in the first row and ends in the second.
         let width = 4;
         let height = context.required_filter_data_height(width).unwrap();
-        assert_eq!(height, 2);
+        assert_eq!(height, 4);
         let mut data = alloc::vec![0; (width * height) as usize * BYTES_PER_TEXEL];
         context.serialize_to_buffer(&mut data);
 
         assert_eq!(read_filter::<GpuOffset>(&data, offsets[0]), offset());
         assert_eq!(read_filter::<GpuGaussianBlur>(&data, offsets[1]), blur(2.0));
         assert_eq!(read_filter::<GpuDropShadow>(&data, offsets[2]), shadow());
-        assert_eq!(read_filter::<GpuFlood>(&data, offsets[3]), flood());
+        assert_eq!(
+            read_filter::<GpuColorMatrix>(&data, offsets[3]),
+            color_matrix()
+        );
+        assert_eq!(read_filter::<GpuFlood>(&data, offsets[4]), flood());
     }
 
     fn step_layout(plan: &FilterPassPlan) -> Vec<Vec<(u32, u32)>> {
@@ -818,7 +866,11 @@ mod tests {
     fn single_pass_filters_finish_in_original() {
         let mut plan = FilterPassPlan::default();
         plan.init(
-            [filter_op(offset_header(), 0), filter_op(flood_header(), 1)],
+            [
+                filter_op(offset_header(), 0),
+                filter_op(flood_header(), 1),
+                filter_op(color_matrix_header(), 2),
+            ],
             SizeU16::new(64),
         );
 
@@ -826,8 +878,16 @@ mod tests {
         assert_eq!(
             step_layout(&plan),
             [
-                alloc::vec![(0, pass_kind::OFFSET), (1, pass_kind::FLOOD)],
-                alloc::vec![(0, pass_kind::COPY), (1, pass_kind::COPY)],
+                alloc::vec![
+                    (0, pass_kind::OFFSET),
+                    (1, pass_kind::FLOOD),
+                    (2, pass_kind::COLOR_MATRIX),
+                ],
+                alloc::vec![
+                    (0, pass_kind::COPY),
+                    (1, pass_kind::COPY),
+                    (2, pass_kind::COPY),
+                ],
             ]
         );
     }
@@ -840,6 +900,23 @@ mod tests {
         assert_eq!(gpu_offset.header & 0x1F, filter_type::OFFSET);
         assert_eq!(gpu_offset.dx, 10.5);
         assert_eq!(gpu_offset.dy, -20.3);
+    }
+
+    #[test]
+    fn test_color_matrix_conversion() {
+        let matrix = core::array::from_fn(|i| i as f32);
+        let gpu_color_matrix = GpuColorMatrix::from(&ColorMatrix::new(matrix));
+
+        assert_eq!(
+            gpu_color_matrix.weights,
+            [
+                [0.0, 1.0, 2.0, 3.0],
+                [5.0, 6.0, 7.0, 8.0],
+                [10.0, 11.0, 12.0, 13.0],
+                [15.0, 16.0, 17.0, 18.0],
+            ]
+        );
+        assert_eq!(gpu_color_matrix.offsets, [4.0, 9.0, 14.0, 19.0]);
     }
 
     fn check_round_trip<T>(gpu: T, expected_type: u32)
@@ -888,6 +965,11 @@ mod tests {
             )),
             filter_type::DROP_SHADOW,
         );
+    }
+
+    #[test]
+    fn test_color_matrix_round_trip() {
+        check_round_trip(color_matrix(), filter_type::COLOR_MATRIX);
     }
 
     fn check_linear_kernel(kernel: &[f32; MAX_KERNEL_SIZE], size: u8, expected_taps: u8) {

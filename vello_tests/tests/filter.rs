@@ -8,9 +8,10 @@ use crate::util::{circular_star, stops_blue_green_red_yellow};
 use crate::{renderer::Renderer, util::layout_glyphs_roboto};
 use vello_common::color::AlphaColor;
 use vello_common::color::palette::css::{
-    BLACK, LIME, PURPLE, REBECCA_PURPLE, ROYAL_BLUE, SEA_GREEN, TOMATO, TRANSPARENT, VIOLET,
+    BLACK, DIM_GRAY, LIME, PURPLE, REBECCA_PURPLE, ROYAL_BLUE, SEA_GREEN, TOMATO, TRANSPARENT,
+    VIOLET,
 };
-use vello_common::filter_effects::{EdgeMode, Filter, FilterPrimitive};
+use vello_common::filter_effects::{EdgeMode, Filter, FilterPrimitive, matrices};
 use vello_common::kurbo::{Affine, BezPath, Circle, Point, Rect, Shape, Stroke};
 use vello_common::paint::Image;
 use vello_common::peniko::{
@@ -174,6 +175,82 @@ fn filter_offset_nested(ctx: &mut impl Renderer) {
     ctx.set_paint(RED);
     ctx.fill_rect(&Rect::new(5.0, 5.0, 55.0, 55.0));
     ctx.pop_layer();
+    ctx.pop_layer();
+}
+
+fn color_matrix_scene(ctx: &mut impl Renderer, matrix: [f32; 20], translucent: impl Shape) {
+    ctx.set_paint(DIM_GRAY);
+    ctx.fill_rect(&Rect::new(0.0, 0.0, 120.0, 80.0));
+    ctx.push_filter_layer(Filter::from_primitive(FilterPrimitive::ColorMatrix {
+        matrix,
+    }));
+    ctx.set_paint(RED);
+    ctx.fill_rect(&Rect::new(10.0, 10.0, 55.0, 35.0));
+    ctx.set_paint(GREEN);
+    ctx.fill_rect(&Rect::new(65.0, 10.0, 110.0, 35.0));
+    ctx.set_paint(BLUE);
+    ctx.fill_rect(&Rect::new(10.0, 45.0, 55.0, 70.0));
+    ctx.set_paint(AlphaColor::from_rgba8(60, 120, 240, 128));
+    ctx.fill_path(&translucent.to_path(0.1));
+    ctx.pop_layer();
+}
+
+/// A matrix that only mixes the color channels, which `vello_cpu` applies to premultiplied colors.
+#[vello_test(skip_multithreaded, width = 120, height = 80)]
+fn filter_color_matrix_sepia(ctx: &mut impl Renderer) {
+    color_matrix_scene(ctx, matrices::SEPIA, Circle::new((87.5, 57.5), 13.0));
+}
+
+#[vello_test(skip_multithreaded, width = 120, height = 80)]
+fn filter_color_matrix_alpha_to_black(ctx: &mut impl Renderer) {
+    color_matrix_scene(
+        ctx,
+        matrices::ALPHA_TO_BLACK,
+        Circle::new((87.5, 57.5), 13.0),
+    );
+}
+
+/// Every coefficient is distinct, so a mix-up of the matrix layout shows, and the alpha offset
+/// also paints the transparent parts of the layer.
+#[vello_test(skip_multithreaded, width = 120, height = 80)]
+fn filter_color_matrix_all_coefficients(ctx: &mut impl Renderer) {
+    color_matrix_scene(
+        ctx,
+        [
+            0.9, 0.12, -0.2, 0.05, 0.15, //
+            -0.3, 0.8, 0.22, 0.14, -0.07, //
+            0.25, -0.11, 0.7, -0.18, 0.35, //
+            0.08, 0.04, -0.06, 0.78, 0.1,
+        ],
+        // Not a circle: unpremultiplying its faint anti-aliased edges differs a lot between backends.
+        Rect::new(65.0, 45.0, 110.0, 70.0),
+    );
+}
+
+#[vello_test(skip_multithreaded)]
+fn filter_color_matrix_transparent_paint(ctx: &mut impl Renderer) {
+    let filter = Filter::from_primitive(FilterPrimitive::ColorMatrix {
+        matrix: [
+            0.0, 0.0, 0.0, 0.0, 1.0, //
+            0.0, 0.0, 0.0, 0.0, 0.39, //
+            0.0, 0.0, 0.0, 0.0, 0.28, //
+            0.0, 0.0, 0.0, 0.0, 0.8,
+        ],
+    });
+    let left = Rect::new(8.0, 8.0, 48.0, 92.0);
+    let right = Rect::new(52.0, 8.0, 92.0, 92.0);
+    ctx.set_paint(TRANSPARENT);
+
+    ctx.push_clip_layer(&left.to_path(0.1));
+    ctx.push_filter_layer(filter.clone());
+    ctx.fill_rect(&left);
+    ctx.pop_layer();
+    ctx.pop_layer();
+
+    ctx.push_clip_layer(&right.to_path(0.1));
+    ctx.set_filter_effect(filter);
+    ctx.fill_rect(&right);
+    ctx.reset_filter_effect();
     ctx.pop_layer();
 }
 

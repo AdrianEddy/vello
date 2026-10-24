@@ -12,6 +12,10 @@ Subheadings to categorize changes are `added, changed, deprecated, removed, fixe
 
 This release has an [MSRV][] of 1.89.
 
+### Added
+
+- `filter::color_matrix::ColorMatrix`, `PreparedFilter::ColorMatrix` and a `ProbeFeature::ColorMatrix` probe element. ([#1765][] by [@AdrianEddy][], [@waywardmonkeys][])
+
 ## [0.3.0][] - 2026-10-02
 
 This release has an [MSRV][] of 1.89.
@@ -262,6 +266,7 @@ This is the initial release. No changelog was kept for this release.
 
 See also the [vello_cpu 0.0.1](../vello_cpu/CHANGELOG.md#001---2025-05-10) release.
 
+[@AdrianEddy]: https://github.com/AdrianEddy
 [@b0nes164]: https://github.com/b0nes164
 [@conor-93]: https://github.com/conor-93
 [@dipeshbabu]: https://github.com/dipeshbabu
@@ -345,6 +350,7 @@ See also the [vello_cpu 0.0.1](../vello_cpu/CHANGELOG.md#001---2025-05-10) relea
 [#1760]: https://github.com/linebender/vello/pull/1760
 [#1762]: https://github.com/linebender/vello/pull/1762
 [#1763]: https://github.com/linebender/vello/pull/1763
+[#1765]: https://github.com/linebender/vello/pull/1765
 [#1768]: https://github.com/linebender/vello/pull/1768
 [#1778]: https://github.com/linebender/vello/pull/1778
 [#1779]: https://github.com/linebender/vello/pull/1779
