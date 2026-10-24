@@ -341,3 +341,104 @@ pub(crate) fn check_ref(
     }
     .check(&encoded_image);
 }
+
+/// Maps each pixel of an NV12 external texture to its raw `[Y, Cb, Cr]` sample.
+#[cfg(not(target_arch = "wasm32"))]
+#[rustfmt::skip]
+pub(crate) const IDENTITY_MATRIX: [f32; 16] = [
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 1.0, 0.0,
+    0.0, 0.0, 0.0, 1.0,
+];
+
+/// Creates a two-plane NV12 external texture: a full-resolution `R8Unorm` Y plane and a
+/// half-resolution `Rg8Unorm` interleaved Cb/Cr plane, converted with `yuv_conversion_matrix`.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn create_nv12_external_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    y_plane: &[u8],
+    uv_plane: &[u8],
+    yuv_conversion_matrix: [f32; 16],
+) -> wgpu::ExternalTexture {
+    let y_view = create_plane_view(
+        device,
+        queue,
+        wgpu::TextureFormat::R8Unorm,
+        width,
+        height,
+        y_plane,
+        width,
+    );
+    let uv_view = create_plane_view(
+        device,
+        queue,
+        wgpu::TextureFormat::Rg8Unorm,
+        width / 2,
+        height / 2,
+        uv_plane,
+        width,
+    );
+    #[rustfmt::skip]
+    let identity_gamut = [
+        1.0, 0.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 1.0,
+    ];
+    device.create_external_texture(
+        &wgpu::ExternalTextureDescriptor {
+            label: Some("Test NV12 External Texture"),
+            width,
+            height,
+            format: wgpu::ExternalTextureFormat::Nv12,
+            yuv_conversion_matrix,
+            gamut_conversion_matrix: identity_gamut,
+            src_transfer_function: wgpu::ExternalTextureTransferFunction::default(),
+            dst_transfer_function: wgpu::ExternalTextureTransferFunction::default(),
+            sample_transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            load_transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        },
+        &[&y_view, &uv_view],
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn create_plane_view(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    format: wgpu::TextureFormat,
+    width: u32,
+    height: u32,
+    data: &[u8],
+    bytes_per_row: u32,
+) -> wgpu::TextureView {
+    let size = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Test External Texture Plane"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        texture.as_image_copy(),
+        data,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(bytes_per_row),
+            rows_per_image: None,
+        },
+        size,
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
+}

@@ -11,8 +11,9 @@ use vello_common::paint::{Image, ImageId, ImageSource};
 use vello_common::peniko::ImageSampler;
 use vello_common::pixmap::Pixmap;
 use vello_gpu::{
-    AtlasConfig, AtlasError, ClearSettings, MemorySettings, RenderError, RenderSettings,
-    RenderSize, RenderTargetConfig, Renderer, Resources, Scene, TargetInit, TextureBindings,
+    AtlasConfig, AtlasError, ClearSettings, MemorySettings, RenderError, RenderRegion,
+    RenderSettings, RenderSize, RenderTargetConfig, Renderer, Resources, Scene, TargetInit,
+    TextureBindings,
 };
 use vello_tests::renderer::lock_wgpu_device;
 
@@ -154,6 +155,7 @@ fn wgpu_render_with_missing_image_fails() {
         TargetInit::Clear(ClearSettings::Viewport {
             color: AlphaColor::TRANSPARENT,
         }),
+        RenderRegion::Viewport,
     );
 
     assert!(matches!(result, Err(RenderError::MissingImage(id)) if id == missing));

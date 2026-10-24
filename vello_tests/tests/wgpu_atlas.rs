@@ -14,9 +14,9 @@ use vello_common::paint::{Image, ImageId, ImageSource, TextureRegion};
 use vello_common::peniko::{BlendMode, Compose, ImageSampler, Mix};
 use vello_common::pixmap::Pixmap;
 use vello_gpu::{
-    AtlasConfig, AtlasError, AtlasId, ClearSettings, MemorySettings, RenderError, RenderSettings,
-    RenderSize, RenderTargetConfig, Renderer, Resources, Scene, TargetInit, TextureBindings,
-    TextureId,
+    AtlasConfig, AtlasError, AtlasId, ClearSettings, MemorySettings, RenderError, RenderRegion,
+    RenderSettings, RenderSize, RenderTargetConfig, Renderer, Resources, Scene, TargetInit,
+    TextureBindings, TextureId,
 };
 use vello_tests::renderer::lock_wgpu_device;
 
@@ -166,6 +166,7 @@ impl Ctx {
             TargetInit::Clear(ClearSettings::Viewport {
                 color: AlphaColor::TRANSPARENT,
             }),
+            RenderRegion::Viewport,
         )
     }
 

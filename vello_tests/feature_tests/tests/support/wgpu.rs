@@ -10,7 +10,8 @@ use vello_common::{
     pixmap::PixelMetadata,
 };
 use vello_gpu::{
-    ClearSettings, RenderSize, RenderTargetConfig, Renderer, Scene, TargetInit, TextureBindings,
+    ClearSettings, RenderRegion, RenderSize, RenderTargetConfig, Renderer, Scene, TargetInit,
+    TextureBindings,
 };
 
 pub(crate) fn render(elements: &[ProbeFeature]) -> Pixmap {
@@ -103,6 +104,7 @@ pub(crate) fn render(elements: &[ProbeFeature]) -> Pixmap {
             Some(&depth),
             &texture_bindings,
             TargetInit::Clear(ClearSettings::Viewport { color: css::WHITE }),
+            RenderRegion::Viewport,
         )
         .unwrap();
 

@@ -52,6 +52,7 @@ mod layer;
 mod mask;
 mod mix;
 mod opacity;
+mod render_region;
 use vello_tests::renderer;
 mod scenes;
 mod target;
@@ -62,6 +63,8 @@ mod wasm_binary_invariants;
 // Plain `#[test]`s, which don't run in the browser.
 #[cfg(not(target_arch = "wasm32"))]
 mod wgpu_atlas;
+#[cfg(not(target_arch = "wasm32"))]
+mod wgpu_clear;
 #[cfg(not(target_arch = "wasm32"))]
 mod wgpu_external_texture;
 #[cfg(not(target_arch = "wasm32"))]

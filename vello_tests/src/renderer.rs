@@ -17,7 +17,7 @@ use vello_cpu::{
     TargetInit as CpuTargetInit,
 };
 use vello_gpu::{
-    ClearSettings, GlyphMaintenance, RectU16, RenderSettings as GpuRenderSettings,
+    ClearSettings, GlyphMaintenance, RectU16, RenderRegion, RenderSettings as GpuRenderSettings,
     Resources as GpuResources, Scene, TargetInit as GpuTargetInit, TextureId,
 };
 #[cfg(all(target_arch = "wasm32", feature = "webgl"))]
@@ -91,6 +91,7 @@ pub trait Renderer: Sized {
     fn set_target_init(&mut self, target_init: GpuTargetInit<'static>);
     fn set_glyph_maintenance(&mut self, glyph_maintenance: GlyphMaintenance);
     fn maintain_glyphs(&mut self);
+    fn set_render_region(&mut self, region: RenderRegion<'static>);
     fn render(&mut self);
     fn snapshot(&mut self) -> Pixmap;
     fn register_external_texture(&mut self, pixmap: Arc<Pixmap>) -> TextureId;
@@ -106,6 +107,7 @@ pub struct CpuRenderer {
     render_mode: RenderMode,
     target: Pixmap,
     target_init: GpuTargetInit<'static>,
+    render_region: RenderRegion<'static>,
 }
 
 impl Renderer for CpuRenderer {
@@ -127,6 +129,7 @@ impl Renderer for CpuRenderer {
             render_mode,
             target: Pixmap::new(width, height),
             target_init: GpuTargetInit::Clear(ClearSettings::default()),
+            render_region: RenderRegion::Viewport,
         }
     }
 
@@ -303,19 +306,31 @@ impl Renderer for CpuRenderer {
         self.resources.maintain_glyphs();
     }
 
+    fn set_render_region(&mut self, region: RenderRegion<'static>) {
+        self.render_region = region;
+    }
+
     fn render(&mut self) {
+        // Vello CPU cannot confine a render to a region, so we render into a copy of the target and
+        // only copy the region back.
+        let mut copy = match self.render_region {
+            RenderRegion::Viewport => None,
+            RenderRegion::Rects(_) => Some(self.target.clone()),
+        };
+        let target = copy.as_mut().unwrap_or(&mut self.target);
+
         let target_init = match self.target_init {
             GpuTargetInit::SrcOver => CpuTargetInit::SrcOver,
             GpuTargetInit::Clear(ClearSettings::Viewport { color }) => CpuTargetInit::Clear(color),
             GpuTargetInit::Clear(ClearSettings::Rects { color, rects }) => {
-                apply_rect_clear(&mut self.target, color, rects);
+                apply_rect_clear(target, color, rects);
 
                 CpuTargetInit::SrcOver
             }
         };
 
         self.ctx.render_with(
-            &mut self.target,
+            target,
             &mut self.resources,
             RasterizerSettings {
                 render_mode: self.render_mode,
@@ -323,6 +338,10 @@ impl Renderer for CpuRenderer {
                 ..Default::default()
             },
         );
+
+        if let (Some(copy), RenderRegion::Rects(rects)) = (copy, self.render_region) {
+            copy_rects(&copy, &mut self.target, rects);
+        }
     }
 
     fn snapshot(&mut self) -> Pixmap {
@@ -399,6 +418,7 @@ pub struct GpuRenderer {
     wgpu_external_textures: HashMap<TextureId, (wgpu::ExternalTexture, u32, u32)>,
     next_external_texture_id: u64,
     target_init: GpuTargetInit<'static>,
+    render_region: RenderRegion<'static>,
     gpu_test_guard: Option<std::sync::MutexGuard<'static, ()>>,
 }
 
@@ -465,6 +485,7 @@ impl GpuRenderer {
             wgpu_external_textures: HashMap::new(),
             next_external_texture_id: 1,
             target_init: GpuTargetInit::Clear(ClearSettings::default()),
+            render_region: RenderRegion::Viewport,
             gpu_test_guard: None,
         }
     }
@@ -706,6 +727,10 @@ impl Renderer for GpuRenderer {
             .maintain_glyphs(&mut self.resources, &self.device, &self.queue);
     }
 
+    fn set_render_region(&mut self, region: RenderRegion<'static>) {
+        self.render_region = region;
+    }
+
     fn render(&mut self) {
         // On some platforms using `cargo test` triggers segmentation faults in wgpu when the GPU
         // tests are run in parallel (likely related to the number of device resources being
@@ -748,6 +773,7 @@ impl Renderer for GpuRenderer {
                 self.depth_texture_view.as_ref(),
                 &texture_bindings,
                 self.target_init,
+                self.render_region,
             )
             .unwrap();
 
@@ -1121,6 +1147,14 @@ impl Renderer for GpuRenderer {
         self.renderer.maintain_glyphs(&mut self.resources);
     }
 
+    fn set_render_region(&mut self, region: RenderRegion<'static>) {
+        assert_eq!(
+            region,
+            RenderRegion::Viewport,
+            "WebGL always renders the complete viewport"
+        );
+    }
+
     fn render(&mut self) {
         let width = self.scene.width();
         let height = self.scene.height();
@@ -1251,6 +1285,22 @@ fn apply_rect_clear(pixmap: &mut Pixmap, color: AlphaColor<Srgb>, rects: &[RectU
             let start = y * width + usize::from(rect.x0);
             let end = y * width + usize::from(rect.x1);
             data[start..end].fill(color);
+        }
+    }
+}
+
+fn copy_rects(src: &Pixmap, dst: &mut Pixmap, rects: &[RectU16]) {
+    let width = usize::from(dst.width());
+    let bounds = RectU16::new(0, 0, dst.width(), dst.height());
+
+    for rect in rects
+        .iter()
+        .map(|rect| rect.intersect(bounds))
+        .filter(|rect| !rect.is_empty())
+    {
+        for y in usize::from(rect.y0)..usize::from(rect.y1) {
+            let row = y * width + usize::from(rect.x0)..y * width + usize::from(rect.x1);
+            dst.data_mut()[row.clone()].copy_from_slice(&src.data()[row]);
         }
     }
 }

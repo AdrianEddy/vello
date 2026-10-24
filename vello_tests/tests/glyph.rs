@@ -1369,7 +1369,7 @@ fn glyphs_atlas_explicit_maintenance_image_upload(ctx: &mut impl Renderer) {
 #[test]
 fn glyphs_atlas_explicit_maintenance_wgpu() {
     use vello_gpu::{
-        ClearSettings, RenderSize, RenderTargetConfig, Resources, Scene, TargetInit,
+        ClearSettings, RenderRegion, RenderSize, RenderTargetConfig, Resources, Scene, TargetInit,
         TextureBindings,
     };
 
@@ -1422,6 +1422,7 @@ fn glyphs_atlas_explicit_maintenance_wgpu() {
                 None,
                 &TextureBindings::new(),
                 TargetInit::Clear(ClearSettings::default()),
+                RenderRegion::Viewport,
             )
             .unwrap();
         encoder.finish()

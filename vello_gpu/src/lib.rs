@@ -134,7 +134,9 @@ pub use render::{
     WebGlTextureWithDimensions,
 };
 #[cfg(feature = "wgpu")]
-pub use render::{AtlasWriter, RenderTargetConfig, Renderer, TextureBinding, TextureBindings};
+pub use render::{
+    AtlasWriter, RenderRegion, RenderTargetConfig, Renderer, TextureBinding, TextureBindings,
+};
 pub use render::{ClearSettings, Config, GpuStrip, RenderSize, TargetInit};
 #[cfg(all(feature = "webgl", feature = "probe"))]
 pub use render::{WebGlPendingProbe, WebGlProbeError, WebGlProbeOperation, WebGlProbeStatus};

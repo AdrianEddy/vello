@@ -1,7 +1,7 @@
 // Copyright 2026 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use super::{Renderer, TextureBindings};
+use super::{RenderRegion, Renderer, TextureBindings};
 use crate::target::RootTarget;
 use crate::{ClearSettings, RenderError, RenderSize, Scene, TargetInit};
 use alloc::sync::Arc;
@@ -170,6 +170,7 @@ impl Renderer {
             &ImageCache::new_dummy(),
             &scene.encoded_paints,
             TargetInit::Clear(ClearSettings::Viewport { color: css::WHITE }),
+            RenderRegion::Viewport,
             RootTarget::UserSurface,
             None,
             &texture_bindings,

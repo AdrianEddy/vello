@@ -142,7 +142,7 @@ pub(crate) struct GpuClearInstance {
     /// Width and height of the target texture.
     pub(crate) target_size: [u32; 2],
     /// Premultiplied clear color.
-    pub(crate) color: u32,
+    pub(crate) color: [f32; 4],
 }
 
 impl MemorySettings {
