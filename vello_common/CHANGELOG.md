@@ -12,6 +12,10 @@ Subheadings to categorize changes are `added, changed, deprecated, removed, fixe
 
 This release has an [MSRV][] of 1.89.
 
+### Changed
+
+- Breaking change: `MultiAtlasManager::try_allocate` rejects an empty size with the new `AtlasError::EmptyTexture` instead of adding atlases until `max_atlases` is reached. (by [@AdrianEddy][])
+
 ## [0.3.0][] - 2026-10-02
 
 This release has an [MSRV][] of 1.89.
@@ -262,6 +266,7 @@ This is the initial release. No changelog was kept for this release.
 
 See also the [vello_cpu 0.0.1](../vello_cpu/CHANGELOG.md#001---2025-05-10) release.
 
+[@AdrianEddy]: https://github.com/AdrianEddy
 [@b0nes164]: https://github.com/b0nes164
 [@conor-93]: https://github.com/conor-93
 [@dipeshbabu]: https://github.com/dipeshbabu

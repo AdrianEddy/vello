@@ -437,26 +437,30 @@ impl App<'_> {
         // 1st example — uploading pixmap directly
         let pixmap1 = ImageScene::read_flower_image();
         let (renderer, resources, ..) = self.renderers[device_id].as_mut().unwrap();
-        renderer.upload_image(
-            resources,
-            &device_handle.device,
-            &device_handle.queue,
-            &mut encoder,
-            &pixmap1,
-        );
+        renderer
+            .upload_image(
+                resources,
+                &device_handle.device,
+                &device_handle.queue,
+                &mut encoder,
+                &pixmap1,
+            )
+            .expect("failed to upload pixmap to the atlas");
 
         // 2nd example — uploading from a texture (for cases where you already have a texture)
         let pixmap2 = ImageScene::read_cowboy_image();
         let texture2 =
             self.upload_image_to_texture(&device_handle.device, &device_handle.queue, &pixmap2);
         let (renderer, resources, ..) = self.renderers[device_id].as_mut().unwrap();
-        renderer.upload_image(
-            resources,
-            &device_handle.device,
-            &device_handle.queue,
-            &mut encoder,
-            &texture2,
-        );
+        renderer
+            .upload_image(
+                resources,
+                &device_handle.device,
+                &device_handle.queue,
+                &mut encoder,
+                &texture2,
+            )
+            .expect("failed to upload texture to the atlas");
 
         device_handle.queue.submit([encoder.finish()]);
         self.uploaded_images[device_id] = true;

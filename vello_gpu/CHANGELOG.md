@@ -16,9 +16,14 @@ This release has an [MSRV][] of 1.89.
 
 - Renderer probing in the wgpu backend through `Renderer::probe`, with the `probe` feature. (by [@LaurenzV][])
 
+### Changed
+
+- Breaking change: `Renderer::upload_image` returns a `Result`, failing instead of panicking when the image is empty or doesn't fit in the atlas, as `WebGlRenderer::upload_image` does. (by [@AdrianEddy][])
+
 ### Fixed
 
 - A potential division by zero in `clip_color` for gray colors in the `Color` and `Luminosity` blend modes. ([#2000][] by [@zlstringham][])
+- The wgpu renderer returns `RenderError::MissingImage` for an image that isn't in the atlas instead of panicking. (by [@AdrianEddy][])
 
 ## [0.3.0][] - 2026-10-02
 

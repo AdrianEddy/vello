@@ -60,5 +60,7 @@ mod wasm_binary_invariants;
 #[cfg(not(target_arch = "wasm32"))]
 mod wgpu_external_texture;
 #[cfg(not(target_arch = "wasm32"))]
+mod wgpu_image_errors;
+#[cfg(not(target_arch = "wasm32"))]
 mod wgpu_probe;
 mod wide_tile;
