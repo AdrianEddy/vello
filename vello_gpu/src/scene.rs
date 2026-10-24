@@ -29,7 +29,9 @@ use vello_common::peniko::{BlendMode, Fill, GradientKind};
 use vello_common::record::{CommandRecorder, Drawable, LayerClip, LayerProps, PoppedLayer};
 use vello_common::render_state::RenderState;
 use vello_common::strip::Strip;
-use vello_common::strip_generator::{GenerationMode, StripGenerator, StripStorage};
+use vello_common::strip_generator::{
+    CoverageTransfer, GenerationMode, StripGenerator, StripStorage,
+};
 use vello_common::transforms::{RootTransforms, Transforms};
 use vello_common::util::{RectExt, into_fast_path_rect, strip_bbox};
 use vello_common::viewport::ViewportState;
@@ -356,6 +358,15 @@ impl Scene {
 
     /// Fill a path with the current paint and fill rule.
     pub fn fill_path(&mut self, path: &BezPath) {
+        self.fill_path_with_transfer(path, CoverageTransfer::IDENTITY);
+    }
+
+    /// Fill a path, mapping its coverage through `coverage_transfer` before it is clipped.
+    pub(crate) fn fill_path_with_transfer(
+        &mut self,
+        path: &BezPath,
+        coverage_transfer: CoverageTransfer,
+    ) {
         if !self.paint_has_area() {
             return;
         }
@@ -370,6 +381,7 @@ impl Scene {
                 ctx.render_state.fill_rule,
                 paint,
                 ctx.aliasing_threshold,
+                coverage_transfer,
             );
         });
     }
@@ -382,6 +394,7 @@ impl Scene {
         fill_rule: Fill,
         paint: Paint,
         aliasing_threshold: Option<u8>,
+        coverage_transfer: CoverageTransfer,
     ) {
         self.record_generated_path(paint, |strip_generator, strip_storage, clip_path| {
             strip_generator.generate_filled_path(
@@ -389,6 +402,7 @@ impl Scene {
                 fill_rule,
                 transform,
                 aliasing_threshold,
+                coverage_transfer,
                 strip_storage,
                 clip_path.map(|clip| clip.path),
             );
@@ -520,6 +534,7 @@ impl Scene {
                     ctx.render_state.fill_rule,
                     paint,
                     ctx.aliasing_threshold,
+                    CoverageTransfer::IDENTITY,
                 );
             }
         });
@@ -646,6 +661,7 @@ impl Scene {
                     Fill::NonZero,
                     paint,
                     ctx.aliasing_threshold,
+                    CoverageTransfer::IDENTITY,
                 );
             }
         });
@@ -712,6 +728,7 @@ impl Scene {
                         self.render_state.fill_rule,
                         layer_transform,
                         self.aliasing_threshold,
+                        CoverageTransfer::IDENTITY,
                         &mut strip_storage,
                         existing_clip.map(|clip| clip.path),
                     );

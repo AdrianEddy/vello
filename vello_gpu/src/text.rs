@@ -16,8 +16,8 @@ use crate::{AtlasId, Resources, Scene};
 use glifo::atlas::{PendingBitmapUpload, PendingClearRect};
 use glifo::renderer::replay_atlas_commands;
 use glifo::{
-    AtlasCacher, AtlasSlot, DrawSink, GLYPH_PADDING, Glyph, GlyphAtlas, GlyphCacheConfig,
-    GlyphRunBackend, ImageCache,
+    AtlasCacher, AtlasSlot, CoverageTransfer, DrawSink, GLYPH_PADDING, Glyph, GlyphAtlas,
+    GlyphCacheConfig, GlyphRunBackend, ImageCache,
 };
 use peniko::BlendMode;
 use peniko::color::palette::css::BLACK;
@@ -166,6 +166,11 @@ impl DrawSink for Scene {
     #[inline]
     fn fill_path(&mut self, path: &BezPath) {
         Self::fill_path(self, path);
+    }
+
+    #[inline]
+    fn fill_path_with_transfer(&mut self, path: &BezPath, transfer: CoverageTransfer) {
+        Self::fill_path_with_transfer(self, path, transfer);
     }
 
     #[inline]

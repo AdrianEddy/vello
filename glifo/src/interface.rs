@@ -8,6 +8,7 @@ use crate::color::{AlphaColor, Srgb};
 use crate::kurbo::{Affine, BezPath, Rect, Shape};
 use crate::peniko::BlendMode;
 use vello_common::paint::{Image, ImageSource, PaintType, Tint};
+use vello_common::strip_generator::CoverageTransfer;
 
 // TODO: This trait is only temporary and will hopefully be replaced once we have a better
 // unifying imaging API.
@@ -21,6 +22,17 @@ pub trait DrawSink {
     fn set_paint_transform(&mut self, t: Affine);
     /// Fill a path with the current paint and transform.
     fn fill_path(&mut self, path: &BezPath);
+    /// Fill a path with the current paint and transform, mapping its coverage through `transfer`
+    /// before it is clipped.
+    ///
+    /// The default implementation ignores `transfer`, for sinks that don't support coverage
+    /// transfers. A renderer that supports them should override this method both on the sink it
+    /// draws glyphs with and on the sink it replays atlas commands into, so that cached and
+    /// uncached glyphs get the same transfer.
+    fn fill_path_with_transfer(&mut self, path: &BezPath, transfer: CoverageTransfer) {
+        let _ = transfer;
+        self.fill_path(path);
+    }
     /// Fill a rectangle with the current paint and transform.
     fn fill_rect(&mut self, rect: &Rect);
     // TODO: `push/pop_clip_layer` are only needed temporarily for Vello renderers so the impact of

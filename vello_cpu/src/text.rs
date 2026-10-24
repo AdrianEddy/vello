@@ -25,7 +25,7 @@ use core::ops::RangeInclusive;
 use glifo::atlas::{
     AtlasConfig, AtlasSlot, GlyphAtlas, GlyphCacheConfig, ImageCache, PendingClearRect,
 };
-use glifo::{AtlasCacher, DrawSink, GlyphRunBackend};
+use glifo::{AtlasCacher, CoverageTransfer, DrawSink, GlyphRunBackend};
 use glifo::{Glyph, renderer};
 use kurbo::{Affine, BezPath, Rect};
 use peniko::BlendMode;
@@ -372,6 +372,11 @@ impl DrawSink for RenderContext {
     #[inline]
     fn fill_path(&mut self, path: &BezPath) {
         Self::fill_path(self, path);
+    }
+
+    #[inline]
+    fn fill_path_with_transfer(&mut self, path: &BezPath, transfer: CoverageTransfer) {
+        Self::fill_path_with_transfer(self, path, transfer);
     }
 
     #[inline]

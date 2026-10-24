@@ -8,7 +8,9 @@ use crate::dispatch::multi_threaded::{
 use std::vec::Vec;
 use vello_common::clip::{ClipRef, PathDataRef};
 use vello_common::geometry::RectU16;
-use vello_common::strip_generator::{GenerationMode, StripGenerator, StripStorage};
+use vello_common::strip_generator::{
+    CoverageTransfer, GenerationMode, StripGenerator, StripStorage,
+};
 use vello_common::util::strip_bbox;
 
 #[derive(Debug)]
@@ -99,6 +101,7 @@ impl Worker {
                     fill_rule,
                     blend_mode,
                     aliasing_threshold,
+                    coverage_transfer,
                     mask,
                 } => {
                     let start = self.strip_storage.strips.len() as u32;
@@ -110,6 +113,7 @@ impl Worker {
                         fill_rule,
                         transform,
                         aliasing_threshold,
+                        coverage_transfer,
                         &mut self.strip_storage,
                         path_clip.map(|clip| clip.path),
                     );
@@ -182,6 +186,7 @@ impl Worker {
                             fill_rule,
                             transform,
                             aliasing_threshold,
+                            CoverageTransfer::IDENTITY,
                             &mut self.strip_storage,
                             path_clip.map(|clip| clip.path),
                         );

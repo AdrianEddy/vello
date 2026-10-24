@@ -34,6 +34,9 @@ mod basic;
 mod blurred_rounded_rect;
 mod clip;
 mod compose;
+// Plain `#[test]`s, which don't run in the browser.
+#[cfg(not(target_arch = "wasm32"))]
+mod coverage_transfer;
 mod external_texture;
 mod filter;
 mod fuzz_regression;

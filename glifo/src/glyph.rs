@@ -42,6 +42,7 @@ use skrifa::{FontRef, OutlineGlyphCollection};
 use skrifa::{GlyphId, MetadataProvider};
 use smallvec::SmallVec;
 use vello_common::paint::PaintType;
+use vello_common::strip_generator::CoverageTransfer;
 
 /// Positioned glyph.
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
@@ -453,6 +454,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
             run_size: _,
             font_info,
             font_embolden,
+            coverage_transfer,
             normalized_coords,
             hinting_instance,
             ..
@@ -503,18 +505,21 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
             // the glyph by pre-concatenating it with the inverted outline transform.
             let outline_cache_key = outline_cache_enabled.then(|| {
                 let fractional_x = outline_transform.translation().x.fract() as f32;
-                GlyphCacheKey::new(
-                    font_info.id,
-                    font_info.index,
-                    glyph.id,
-                    draw_props.font_size,
-                    hinted,
-                    fractional_x,
-                    BLACK,
-                    BLACK_PACKED,
-                    font_embolden,
-                    normalized_coords,
-                )
+                GlyphCacheKey {
+                    coverage_transfer,
+                    ..GlyphCacheKey::new(
+                        font_info.id,
+                        font_info.index,
+                        glyph.id,
+                        draw_props.font_size,
+                        hinted,
+                        fractional_x,
+                        BLACK,
+                        BLACK_PACKED,
+                        font_embolden,
+                        normalized_coords,
+                    )
+                }
             });
             if let Some(ref key) = outline_cache_key
                 && let Some(cached_slot) = self.atlas_cacher.get(key)
@@ -559,6 +564,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                     embolden_join_bits: join_bits(Join::Miter),
                     embolden_miter_limit_bits: 4.0_f32.to_bits(),
                     embolden_tolerance_bits: 0.1_f32.to_bits(),
+                    coverage_transfer: CoverageTransfer::IDENTITY,
                     var_coords: SmallVec::from_slice(normalized_coords),
                 });
 
@@ -600,6 +606,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                     Style::Fill => fill_glyph(
                         renderer,
                         prepared_glyph,
+                        CoverageTransfer::IDENTITY,
                         &mut self.atlas_cacher,
                         &mut outline_cache_session,
                     ),
@@ -669,6 +676,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                     embolden_join_bits: join_bits(Join::Miter),
                     embolden_miter_limit_bits: 4.0_f32.to_bits(),
                     embolden_tolerance_bits: 0.1_f32.to_bits(),
+                    coverage_transfer: CoverageTransfer::IDENTITY,
                     var_coords: SmallVec::new(),
                 });
 
@@ -697,6 +705,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                     Style::Fill => fill_glyph(
                         renderer,
                         prepared_glyph,
+                        CoverageTransfer::IDENTITY,
                         &mut self.atlas_cacher,
                         &mut outline_cache_session,
                     ),
@@ -752,6 +761,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 Style::Fill => fill_glyph(
                     renderer,
                     prepared_glyph,
+                    coverage_transfer,
                     &mut self.atlas_cacher,
                     &mut outline_cache_session,
                 ),
@@ -971,6 +981,7 @@ impl<'a, B> GlyphRunBuilder<'a, B> {
                 font,
                 font_size: 16.0,
                 font_embolden: FontEmbolden::default(),
+                coverage_transfer: CoverageTransfer::IDENTITY,
                 transform,
                 scene_paint_transform: transform * paint_transform,
                 glyph_transform: None,
@@ -990,6 +1001,16 @@ impl<'a, B> GlyphRunBuilder<'a, B> {
     /// Set synthetic embolden settings.
     pub fn font_embolden(mut self, embolden: FontEmbolden) -> Self {
         self.run.font_embolden = embolden;
+        self
+    }
+
+    /// Set the transfer applied to the coverage of filled outline glyphs.
+    ///
+    /// Each distinct transfer is rasterized and cached separately, so a transfer that depends on
+    /// a continuous value, such as the text color, should be derived from a quantized version of
+    /// it. Defaults to [`CoverageTransfer::IDENTITY`].
+    pub fn coverage_transfer(mut self, transfer: CoverageTransfer) -> Self {
+        self.run.coverage_transfer = transfer;
         self
     }
 
@@ -1547,6 +1568,8 @@ pub struct GlyphRun<'a> {
     font_size: f32,
     /// Synthetic embolden settings.
     font_embolden: FontEmbolden,
+    /// Coverage transfer for filled outline glyphs.
+    coverage_transfer: CoverageTransfer,
     /// Global transform.
     transform: Affine,
     /// Paint transform for the glyph run in scene space.
@@ -1575,6 +1598,8 @@ struct PreparedGlyphRun<'a> {
     run_size: f32,
     /// Synthetic embolden settings.
     font_embolden: FontEmbolden,
+    /// Coverage transfer for filled outline glyphs.
+    coverage_transfer: CoverageTransfer,
     /// The original per-glyph transform supplied by the caller.
     glyph_transform: Option<Affine>,
     // Continuing the above comment, the problem is that we also need to precalculate data
@@ -1645,6 +1670,7 @@ impl Debug for PreparedGlyphRun<'_> {
             .field("font_info", &self.font_info)
             .field("run_size", &self.run_size)
             .field("font_embolden", &self.font_embolden)
+            .field("coverage_transfer", &self.coverage_transfer)
             .field("glyph_transform", &self.glyph_transform)
             .field("transforms", &self.draw_props)
             .field("normalized_coords", &self.normalized_coords)
@@ -1748,6 +1774,7 @@ fn prepare_glyph_run<'a>(run: GlyphRun<'a>, hint_cache: &'a mut HintCache) -> Pr
         font_info,
         run_size: run.font_size,
         font_embolden: run.font_embolden,
+        coverage_transfer: run.coverage_transfer,
         glyph_transform: run.glyph_transform,
         draw_props: DrawProps {
             positioning_transform: run
@@ -2292,7 +2319,7 @@ fn x_y_advances(transform: &Affine) -> (Vec2, Vec2) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::atlas::{AtlasConfig, AtlasPaint};
+    use crate::atlas::{AtlasCommand, AtlasConfig, AtlasPaint};
     use crate::interface::{DrawSink, GlyphRenderer};
     use crate::peniko::BlendMode;
     use crate::peniko::Blob;
@@ -2318,13 +2345,18 @@ mod tests {
         Bitmap,
     }
 
+    /// A renderer that only records the paths it fills and strokes.
     #[derive(Default)]
-    struct NoopRenderer;
+    struct RecordingRenderer {
+        /// The coverage transfer of each filled path, `None` for plain fills.
+        fills: Vec<Option<CoverageTransfer>>,
+        strokes: usize,
+    }
 
     static BLACK_PAINT: PaintType = PaintType::Solid(BLACK);
 
     struct TestResources {
-        renderer: NoopRenderer,
+        renderer: RecordingRenderer,
         prep_cache: GlyphPrepCache,
         glyph_atlas: GlyphAtlas,
         image_cache: ImageCache,
@@ -2332,26 +2364,58 @@ mod tests {
 
     impl Default for TestResources {
         fn default() -> Self {
+            Self::with_atlas_size(512)
+        }
+    }
+
+    impl TestResources {
+        fn with_atlas_size(size: u16) -> Self {
             Self {
-                renderer: NoopRenderer,
+                renderer: RecordingRenderer::default(),
                 prep_cache: GlyphPrepCache::default(),
                 glyph_atlas: GlyphAtlas::default(),
                 image_cache: ImageCache::new_with_config(AtlasConfig {
-                    atlas_size: (512, 512),
+                    atlas_size: (size, size),
                     ..AtlasConfig::default()
                 }),
             }
         }
+
+        /// The coverage transfers of the paths recorded for rasterization into the atlas.
+        fn atlas_fills(&mut self) -> Vec<Option<CoverageTransfer>> {
+            let mut fills = Vec::new();
+            self.glyph_atlas
+                .replay_pending_atlas_commands(|recorder| {
+                    for command in &recorder.commands {
+                        match command {
+                            AtlasCommand::FillPath(_) => fills.push(None),
+                            AtlasCommand::FillPathWithTransfer(_, transfer) => {
+                                fills.push(Some(*transfer));
+                            }
+                            _ => {}
+                        }
+                    }
+                    Ok::<(), core::convert::Infallible>(())
+                })
+                .unwrap();
+            fills
+        }
     }
 
-    impl DrawSink for NoopRenderer {
+    impl DrawSink for RecordingRenderer {
         fn set_transform(&mut self, _t: Affine) {}
 
         fn set_paint(&mut self, _paint: AtlasPaint) {}
 
         fn set_paint_transform(&mut self, _t: Affine) {}
 
-        fn fill_path(&mut self, _path: &BezPath) {}
+        fn fill_path(&mut self, _path: &BezPath) {
+            self.fills.push(None);
+        }
+
+        fn fill_path_with_transfer(&mut self, _path: &BezPath, transfer: CoverageTransfer) {
+            self.fills.push(Some(transfer));
+        }
 
         fn fill_rect(&mut self, _rect: &Rect) {}
 
@@ -2370,14 +2434,16 @@ mod tests {
         }
     }
 
-    impl GlyphRenderer for NoopRenderer {
+    impl GlyphRenderer for RecordingRenderer {
         type SavedState = ();
 
         fn save_state(&mut self) -> Self::SavedState {}
 
         fn restore_state(&mut self, _state: Self::SavedState) {}
 
-        fn stroke_path(&mut self, _path: &BezPath) {}
+        fn stroke_path(&mut self, _path: &BezPath) {
+            self.strokes += 1;
+        }
 
         fn set_paint_image(&mut self, _image: Image) {}
 
@@ -2432,6 +2498,24 @@ mod tests {
         style: Style,
         resources: &mut TestResources,
     ) {
+        draw_test_glyph_with_transfer(
+            font,
+            glyph,
+            atlas_cache_enabled,
+            style,
+            CoverageTransfer::IDENTITY,
+            resources,
+        );
+    }
+
+    fn draw_test_glyph_with_transfer(
+        font: &FontData,
+        glyph: Glyph,
+        atlas_cache_enabled: bool,
+        style: Style,
+        coverage_transfer: CoverageTransfer,
+        resources: &mut TestResources,
+    ) {
         let atlas_cacher = if atlas_cache_enabled {
             AtlasCacher::Enabled(&mut resources.glyph_atlas, &mut resources.image_cache)
         } else {
@@ -2443,6 +2527,7 @@ mod tests {
             font: font.clone(),
             font_size: 20.0,
             font_embolden: FontEmbolden::default(),
+            coverage_transfer,
             transform,
             scene_paint_transform: transform,
             glyph_transform: None,
@@ -2572,6 +2657,7 @@ mod tests {
             font,
             font_size: 20.0,
             font_embolden: FontEmbolden::default(),
+            coverage_transfer: CoverageTransfer::IDENTITY,
             transform: Affine::IDENTITY,
             scene_paint_transform: Affine::IDENTITY,
             glyph_transform: None,
@@ -2595,5 +2681,160 @@ mod tests {
                 skipped_count: 1,
             })
         );
+    }
+
+    #[test]
+    fn outline_glyph_drawn_directly_gets_coverage_transfer() {
+        let font = test_font(TestGlyphKind::Outline);
+        let glyph = test_glyph(&font, TestGlyphKind::Outline);
+        let transfer = CoverageTransfer::new(0.5, 0.25);
+        let mut resources = TestResources::default();
+
+        draw_test_glyph_with_transfer(&font, glyph, false, Style::Fill, transfer, &mut resources);
+
+        assert_eq!(resources.renderer.fills, [Some(transfer)]);
+    }
+
+    #[test]
+    fn outline_glyph_is_rasterized_into_atlas_with_coverage_transfer() {
+        let font = test_font(TestGlyphKind::Outline);
+        let glyph = test_glyph(&font, TestGlyphKind::Outline);
+        let transfer = CoverageTransfer::new(0.5, 0.25);
+        let mut resources = TestResources::default();
+
+        draw_test_glyph_with_transfer(&font, glyph, true, Style::Fill, transfer, &mut resources);
+
+        assert!(resources.renderer.fills.is_empty());
+        assert_eq!(resources.atlas_fills(), [Some(transfer)]);
+    }
+
+    #[test]
+    fn outline_glyph_falls_back_to_direct_fill_with_coverage_transfer_when_atlas_is_full() {
+        let font = test_font(TestGlyphKind::Outline);
+        let glyph = test_glyph(&font, TestGlyphKind::Outline);
+        let transfer = CoverageTransfer::new(0.5, 0.25);
+        let mut resources = TestResources::with_atlas_size(4);
+
+        draw_test_glyph_with_transfer(&font, glyph, true, Style::Fill, transfer, &mut resources);
+
+        assert_eq!(resources.glyph_atlas.len(), 0);
+        assert_eq!(resources.renderer.fills, [Some(transfer)]);
+    }
+
+    #[test]
+    fn coverage_transfers_are_cached_separately() {
+        let font = test_font(TestGlyphKind::Outline);
+        let glyph = test_glyph(&font, TestGlyphKind::Outline);
+        let a = CoverageTransfer::new(0.5, 0.0);
+        let b = CoverageTransfer::new(0.0, 0.5);
+        let mut resources = TestResources::default();
+
+        for (transfer, entries, hits) in [
+            (CoverageTransfer::IDENTITY, 1, 0),
+            (a, 2, 0),
+            (b, 3, 0),
+            (a, 3, 1),
+        ] {
+            draw_test_glyph_with_transfer(
+                &font,
+                glyph,
+                true,
+                Style::Fill,
+                transfer,
+                &mut resources,
+            );
+            assert_eq!(resources.glyph_atlas.len(), entries);
+            assert_eq!(resources.glyph_atlas.cache_hits(), hits);
+        }
+        assert_eq!(
+            resources.atlas_fills(),
+            [Some(CoverageTransfer::IDENTITY), Some(a), Some(b)]
+        );
+    }
+
+    fn assert_coverage_transfer_ignored(kind: TestGlyphKind) {
+        let font = test_font(kind);
+        let glyph = test_glyph(&font, kind);
+        let mut resources = TestResources::default();
+
+        draw_test_glyph(&font, glyph, true, Style::Fill, &mut resources);
+        let transfer = CoverageTransfer::new(0.5, 0.25);
+        draw_test_glyph_with_transfer(&font, glyph, true, Style::Fill, transfer, &mut resources);
+
+        assert_eq!(resources.glyph_atlas.len(), 1);
+        assert_eq!(resources.glyph_atlas.cache_hits(), 1);
+        let atlas_fills = resources.atlas_fills();
+        assert!(
+            resources
+                .renderer
+                .fills
+                .iter()
+                .chain(&atlas_fills)
+                .all(|fill| fill.is_none_or(|transfer| transfer == CoverageTransfer::IDENTITY))
+        );
+    }
+
+    #[test]
+    fn colr_glyph_ignores_coverage_transfer() {
+        assert_coverage_transfer_ignored(TestGlyphKind::Colr);
+    }
+
+    #[cfg(feature = "png")]
+    #[test]
+    fn bitmap_glyph_ignores_coverage_transfer() {
+        assert_coverage_transfer_ignored(TestGlyphKind::Bitmap);
+    }
+
+    #[test]
+    fn stroked_outline_glyph_ignores_coverage_transfer() {
+        let font = test_font(TestGlyphKind::Outline);
+        let glyph = test_glyph(&font, TestGlyphKind::Outline);
+        let transfer = CoverageTransfer::new(0.5, 0.25);
+        let mut resources = TestResources::default();
+
+        draw_test_glyph_with_transfer(&font, glyph, true, Style::Stroke, transfer, &mut resources);
+
+        assert_eq!(resources.renderer.strokes, 1);
+        assert!(resources.renderer.fills.is_empty());
+        assert!(resources.atlas_fills().is_empty());
+    }
+
+    #[test]
+    fn draw_sink_without_coverage_transfer_support_fills_plain_path() {
+        struct PlainSink {
+            fills: usize,
+        }
+
+        impl DrawSink for PlainSink {
+            fn set_transform(&mut self, _t: Affine) {}
+
+            fn set_paint(&mut self, _paint: AtlasPaint) {}
+
+            fn set_paint_transform(&mut self, _t: Affine) {}
+
+            fn fill_path(&mut self, _path: &BezPath) {
+                self.fills += 1;
+            }
+
+            fn fill_rect(&mut self, _rect: &Rect) {}
+
+            fn push_clip_layer(&mut self, _clip: &BezPath) {}
+
+            fn push_blend_layer(&mut self, _blend_mode: BlendMode) {}
+
+            fn pop_layer(&mut self) {}
+
+            fn width(&self) -> u16 {
+                1
+            }
+
+            fn height(&self) -> u16 {
+                1
+            }
+        }
+
+        let mut sink = PlainSink { fills: 0 };
+        sink.fill_path_with_transfer(&BezPath::new(), CoverageTransfer::new(0.5, 0.25));
+        assert_eq!(sink.fills, 1);
     }
 }

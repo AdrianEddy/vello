@@ -15,6 +15,7 @@ This release has an [MSRV][] of 1.89.
 ### Added
 
 - Renderer probing in the wgpu backend through `Renderer::probe`, with the `probe` feature. (by [@LaurenzV][])
+- Support for coverage transfers on glyph runs (`GlyphRunBuilder::coverage_transfer`). (by [@AdrianEddy][])
 
 ### Fixed
 

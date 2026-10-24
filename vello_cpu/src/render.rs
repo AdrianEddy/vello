@@ -32,6 +32,7 @@ use vello_common::peniko::color::palette::css::BLACK;
 use vello_common::peniko::{BlendMode, Fill};
 use vello_common::pixmap::{Pixmap, PixmapMut};
 use vello_common::render_state::RenderState;
+use vello_common::strip_generator::CoverageTransfer;
 use vello_common::transforms::{RootTransforms, Transforms};
 use vello_common::util::into_fast_path_rect;
 
@@ -281,6 +282,15 @@ impl RenderContext {
 
     /// Fill a path.
     pub fn fill_path(&mut self, path: &BezPath) {
+        self.fill_path_with_transfer(path, CoverageTransfer::IDENTITY);
+    }
+
+    /// Fill a path, mapping its coverage through `coverage_transfer` before it is clipped.
+    pub(crate) fn fill_path_with_transfer(
+        &mut self,
+        path: &BezPath,
+        coverage_transfer: CoverageTransfer,
+    ) {
         if !self.paint_has_area() {
             return;
         }
@@ -301,6 +311,7 @@ impl RenderContext {
                 paint,
                 ctx.state.blend_mode,
                 ctx.aliasing_threshold,
+                coverage_transfer,
                 ctx.mask.clone(),
             );
         });
@@ -367,6 +378,7 @@ impl RenderContext {
                     paint,
                     ctx.state.blend_mode,
                     ctx.aliasing_threshold,
+                    CoverageTransfer::IDENTITY,
                     ctx.mask.clone(),
                 );
             }
@@ -468,6 +480,7 @@ impl RenderContext {
             paint,
             self.state.blend_mode,
             self.aliasing_threshold,
+            CoverageTransfer::IDENTITY,
             self.mask.clone(),
         );
     }

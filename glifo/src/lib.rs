@@ -64,3 +64,4 @@ pub use glyph::{
     GlyphSkipReason, HintCache, HintKey, NormalizedCoord, OutlineCache, SkippedGlyph,
 };
 pub use interface::{DrawSink, GlyphRenderer};
+pub use vello_common::strip_generator::CoverageTransfer;

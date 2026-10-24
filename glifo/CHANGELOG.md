@@ -12,6 +12,14 @@ Subheadings to categorize changes are `added, changed, deprecated, removed, fixe
 
 This release has an [MSRV][] of 1.89.
 
+### Added
+
+- `GlyphRunBuilder::coverage_transfer` for remapping the coverage of filled outline glyphs, and `DrawSink::fill_path_with_transfer` for renderers to support it. (by [@AdrianEddy][])
+
+### Changed
+
+- Breaking change: `GlyphCacheKey` has a `coverage_transfer` field and `AtlasCommand` has a `FillPathWithTransfer` variant. (by [@AdrianEddy][])
+
 ## [0.4.0][] - 2026-10-02
 
 This release has an [MSRV][] of 1.89.
@@ -67,6 +75,7 @@ The first release of Glifo!
 
 Glifo moved to the Vello repo in [#1539][] and was prepared for release by [@conor-93][], [@grebmeg][], [@jrmoulton][], [@LaurenzV][], [@nicoburns][], [@oscargus][], [@taj-p][], and [@xStrom][].
 
+[@AdrianEddy]: https://github.com/AdrianEddy
 [@conor-93]: https://github.com/conor-93
 [@grebmeg]: https://github.com/grebmeg
 [@jrmoulton]: https://github.com/jrmoulton

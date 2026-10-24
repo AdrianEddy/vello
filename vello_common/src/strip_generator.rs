@@ -76,6 +76,69 @@ impl StripStorage {
     }
 }
 
+/// A transfer applied to the coverage of a filled path before it is clipped.
+///
+/// Coverage `a` becomes `a + a(1 − a)(weight + sharpness · (2a − 1))`, clamped to `[0, 1]`, so
+/// empty and fully covered pixels keep their coverage. A positive sharpness steepens edges around
+/// `a = 0.5` (`1.0` gives a smoothstep) and a negative one softens them. A positive weight thickens
+/// the shape and a negative one thins it.
+///
+/// Both parameters are clamped to `[-2, 2]` and stored in steps of 1/256.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct CoverageTransfer {
+    sharpness: i16,
+    weight: i16,
+}
+
+impl CoverageTransfer {
+    /// The transfer that leaves coverage unchanged.
+    pub const IDENTITY: Self = Self {
+        sharpness: 0,
+        weight: 0,
+    };
+
+    /// Create a coverage transfer from its sharpness and weight.
+    ///
+    /// Non-finite parameters panic in debug builds. In release builds, `NaN` is treated as `0`
+    /// and infinities as the nearest bound.
+    pub const fn new(sharpness: f32, weight: f32) -> Self {
+        Self {
+            sharpness: to_fixed(sharpness),
+            weight: to_fixed(weight),
+        }
+    }
+
+    fn apply(self, alphas: &mut [u8]) {
+        if self == Self::IDENTITY {
+            return;
+        }
+
+        let sharpness = f32::from(self.sharpness) / 256.0;
+        let weight = f32::from(self.weight) / 256.0;
+        for alpha in alphas {
+            let coverage = f32::from(*alpha);
+            // `255 · a(1 − a)` for the normalized coverage `a`, exactly zero at 0 and 255.
+            let edge = coverage * (255.0 - coverage) * (1.0 / 255.0);
+            let shift = weight + sharpness * (2.0 * coverage - 255.0) * (1.0 / 255.0);
+            *alpha = ((coverage + edge * shift).clamp(0.0, 255.0) + 0.5) as u8;
+        }
+    }
+}
+
+const fn to_fixed(value: f32) -> i16 {
+    debug_assert!(
+        value.is_finite(),
+        "coverage transfer parameters must be finite"
+    );
+    let scaled = value.clamp(-2.0, 2.0) * 256.0;
+    // The cast rounds toward zero and maps `NaN` to zero.
+    (if scaled < 0.0 {
+        scaled - 0.5
+    } else {
+        scaled + 0.5
+    }) as i16
+}
+
 /// An object for easily generating strips for a filled/stroked path.
 #[derive(Debug)]
 pub struct StripGenerator {
@@ -116,13 +179,15 @@ impl StripGenerator {
         self.height
     }
 
-    /// Generate the strips for a filled path.
+    /// Generate the strips for a filled path, mapping its coverage through `coverage_transfer`
+    /// before it is clipped.
     pub fn generate_filled_path(
         &mut self,
         path: impl IntoIterator<Item = PathEl>,
         fill_rule: Fill,
         transform: Affine,
         aliasing_threshold: Option<u8>,
+        coverage_transfer: CoverageTransfer,
         strip_storage: &mut StripStorage,
         clip_path: Option<PathDataRef<'_>>,
     ) {
@@ -138,7 +203,13 @@ impl StripGenerator {
             cull_bbox,
         );
 
-        self.generate_with_clip(aliasing_threshold, strip_storage, fill_rule, clip_path);
+        self.generate_with_clip(
+            aliasing_threshold,
+            coverage_transfer,
+            strip_storage,
+            fill_rule,
+            clip_path,
+        );
     }
 
     /// Generate the strips for a stroked path.
@@ -164,12 +235,19 @@ impl StripGenerator {
             &mut self.stroke_ctx,
             cull_bbox,
         );
-        self.generate_with_clip(aliasing_threshold, strip_storage, Fill::NonZero, clip_path);
+        self.generate_with_clip(
+            aliasing_threshold,
+            CoverageTransfer::IDENTITY,
+            strip_storage,
+            Fill::NonZero,
+            clip_path,
+        );
     }
 
     fn generate_with_clip(
         &mut self,
         aliasing_threshold: Option<u8>,
+        coverage_transfer: CoverageTransfer,
         strip_storage: &mut StripStorage,
         fill_rule: Fill,
         clip_path: Option<PathDataRef<'_>>,
@@ -188,6 +266,7 @@ impl StripGenerator {
             strip_storage,
             clip_path,
             |strips, alphas| {
+                let alphas_start = alphas.len();
                 strip::render(
                     level,
                     tiles,
@@ -197,6 +276,7 @@ impl StripGenerator {
                     aliasing_threshold,
                     line_buf,
                 );
+                coverage_transfer.apply(&mut alphas[alphas_start..]);
             },
         );
     }
@@ -303,11 +383,14 @@ fn render_with_clip(
 #[cfg(test)]
 mod tests {
     use alloc::format;
+    use alloc::vec::Vec;
 
+    use crate::clip::{PathDataRef, intersect};
     use crate::fearless_simd::Level;
-    use crate::kurbo::{Affine, Rect, Shape};
+    use crate::geometry::RectU16;
+    use crate::kurbo::{Affine, Circle, PathEl, Rect, Shape};
     use crate::peniko::Fill;
-    use crate::strip_generator::{StripGenerator, StripStorage};
+    use crate::strip_generator::{CoverageTransfer, GenerationMode, StripGenerator, StripStorage};
 
     #[test]
     fn reset() {
@@ -320,6 +403,7 @@ mod tests {
             Fill::NonZero,
             Affine::IDENTITY,
             None,
+            CoverageTransfer::IDENTITY,
             &mut storage,
             None,
         );
@@ -346,6 +430,7 @@ mod tests {
             Fill::NonZero,
             Affine::IDENTITY,
             None,
+            CoverageTransfer::IDENTITY,
             &mut storage_path,
             None,
         );
@@ -456,5 +541,201 @@ mod tests {
     #[test]
     fn rect_inverted_both_axes() {
         assert_rect_fast_eq_path(Rect::new(18.0, 18.0, 2.0, 2.0), "inverted_both_axes");
+    }
+
+    /// The documented curve, evaluated in `f64` for parameters given in steps of 1/256.
+    fn reference_transfer(sharpness: i16, weight: i16, coverage: u8) -> u8 {
+        let s = f64::from(sharpness) / 256.0;
+        let w = f64::from(weight) / 256.0;
+        let a = f64::from(coverage) / 255.0;
+        let t = a + a * (1.0 - a) * (w + s * (2.0 * a - 1.0));
+        ((t * 255.0).clamp(0.0, 255.0) + 0.5) as u8
+    }
+
+    fn transferred(transfer: CoverageTransfer, alphas: &[u8]) -> Vec<u8> {
+        let mut alphas = alphas.to_vec();
+        transfer.apply(&mut alphas);
+        alphas
+    }
+
+    #[test]
+    fn coverage_transfer_matches_curve() {
+        let all: Vec<u8> = (0..=u8::MAX).collect();
+        assert_eq!(transferred(CoverageTransfer::IDENTITY, &all), all);
+
+        for (sharpness, weight) in [
+            (256, 0),
+            (154, 0),
+            (-115, -198),
+            (-96, 199),
+            (0, 128),
+            (0, -128),
+            (512, 512),
+            (-512, -512),
+            (512, -512),
+            (-512, 512),
+        ] {
+            let transfer =
+                CoverageTransfer::new(f32::from(sharpness) / 256.0, f32::from(weight) / 256.0);
+            let expected: Vec<u8> = all
+                .iter()
+                .map(|&a| reference_transfer(sharpness, weight, a))
+                .collect();
+            assert_eq!(
+                transferred(transfer, &all),
+                expected,
+                "sharpness {sharpness}/256, weight {weight}/256"
+            );
+        }
+    }
+
+    #[test]
+    fn coverage_transfer_keeps_empty_and_full_coverage() {
+        for (sharpness, weight) in [
+            (2.0, 2.0),
+            (-2.0, -2.0),
+            (2.0, -2.0),
+            (-2.0, 2.0),
+            (2.0, 0.0),
+            (0.0, -2.0),
+        ] {
+            let transfer = CoverageTransfer::new(sharpness, weight);
+            assert_eq!(transferred(transfer, &[0, 255]), [0, 255]);
+        }
+    }
+
+    #[test]
+    fn coverage_transfer_parameters_are_clamped_and_quantized() {
+        const HALF: CoverageTransfer = CoverageTransfer::new(0.5, 0.25);
+        assert_eq!(HALF, CoverageTransfer::new(0.5001, 0.2499));
+        assert_eq!(
+            CoverageTransfer::new(5.0, -7.0),
+            CoverageTransfer::new(2.0, -2.0)
+        );
+        assert_eq!(
+            CoverageTransfer::new(0.5, 0.25),
+            CoverageTransfer::new(0.5001, 0.2499)
+        );
+        assert_ne!(
+            CoverageTransfer::new(0.5, 0.25),
+            CoverageTransfer::new(0.5 + 1.0 / 256.0, 0.25)
+        );
+        assert_eq!(CoverageTransfer::new(-0.0, 0.0), CoverageTransfer::IDENTITY);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "finite")]
+    fn coverage_transfer_rejects_nan() {
+        let _ = CoverageTransfer::new(f32::NAN, 0.0);
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn coverage_transfer_non_finite_parameters() {
+        assert_eq!(
+            CoverageTransfer::new(f32::NAN, 0.0),
+            CoverageTransfer::IDENTITY
+        );
+        assert_eq!(
+            CoverageTransfer::new(f32::INFINITY, f32::NEG_INFINITY),
+            CoverageTransfer::new(2.0, -2.0)
+        );
+    }
+
+    fn transfer_test_path() -> impl Iterator<Item = PathEl> {
+        Circle::new((20.3, 18.7), 13.4).path_elements(0.1)
+    }
+
+    #[test]
+    fn coverage_transfer_maps_only_new_alphas() {
+        let transfer = CoverageTransfer::new(0.8, 0.2);
+        let mut generator = StripGenerator::new(40, 40, Level::baseline());
+        let mut storage = StripStorage::new(GenerationMode::Append);
+
+        generator.generate_filled_path(
+            transfer_test_path(),
+            Fill::NonZero,
+            Affine::IDENTITY,
+            None,
+            CoverageTransfer::IDENTITY,
+            &mut storage,
+            None,
+        );
+        let linear = storage.alphas.clone();
+        generator.generate_filled_path(
+            transfer_test_path(),
+            Fill::NonZero,
+            Affine::IDENTITY,
+            None,
+            transfer,
+            &mut storage,
+            None,
+        );
+
+        let (first, second) = storage.alphas.split_at(linear.len());
+        assert_eq!(first, linear);
+        let expected = transferred(transfer, &linear);
+        assert_ne!(expected, linear);
+        assert_eq!(second, expected);
+    }
+
+    #[test]
+    fn coverage_transfer_applies_before_clipping() {
+        let level = Level::baseline();
+        let transfer = CoverageTransfer::new(0.8, 0.2);
+        let mut generator = StripGenerator::new(40, 40, level);
+
+        let mut clip = StripStorage::default();
+        generator.generate_filled_path(
+            Circle::new((26.6, 22.2), 11.3).path_elements(0.1),
+            Fill::NonZero,
+            Affine::IDENTITY,
+            None,
+            CoverageTransfer::IDENTITY,
+            &mut clip,
+            None,
+        );
+        let clip = PathDataRef {
+            strips: &clip.strips,
+            alphas: &clip.alphas,
+            bbox: RectU16::new(0, 0, 40, 40),
+        };
+        let generate = |generator: &mut StripGenerator, transfer, clip| {
+            let mut storage = StripStorage::default();
+            generator.generate_filled_path(
+                transfer_test_path(),
+                Fill::NonZero,
+                Affine::IDENTITY,
+                None,
+                transfer,
+                &mut storage,
+                clip,
+            );
+            storage
+        };
+        let clip_storage = |path: &StripStorage| {
+            let path = PathDataRef {
+                strips: &path.strips,
+                alphas: &path.alphas,
+                bbox: RectU16::new(0, 0, u16::MAX, u16::MAX),
+            };
+            let mut clipped = StripStorage::default();
+            intersect(level, clip, path, &mut clipped);
+            clipped
+        };
+
+        let clipped = generate(&mut generator, transfer, Some(clip));
+        let expected = clip_storage(&generate(&mut generator, transfer, None));
+        assert_eq!(clipped, expected);
+        assert_ne!(
+            clipped,
+            generate(&mut generator, CoverageTransfer::IDENTITY, Some(clip))
+        );
+
+        let mut transferred_after_clipping =
+            clip_storage(&generate(&mut generator, CoverageTransfer::IDENTITY, None));
+        transfer.apply(&mut transferred_after_clipping.alphas);
+        assert_ne!(clipped.alphas, transferred_after_clipping.alphas);
     }
 }
