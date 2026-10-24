@@ -19,6 +19,7 @@ This release has an [MSRV][] of 1.89.
 ### Fixed
 
 - A potential division by zero in `clip_color` for gray colors in the `Color` and `Luminosity` blend modes. ([#2000][] by [@zlstringham][])
+- Draws disappearing once a target received more than 2^24 + 1 opaque draws; opaque draws after the first 2^24 - 1 now use the alpha pass. (by [@AdrianEddy][])
 
 ## [0.3.0][] - 2026-10-02
 
