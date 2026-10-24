@@ -28,10 +28,6 @@ var original_texture: texture_2d<f32>;
 
 // Keep these variables and layouts in sync with the ones in `filter.rs`!
 
-const FILTER_SIZE_BYTES: u32 = 48;
-const FILTER_SIZE_U32: u32 = FILTER_SIZE_BYTES / 4;
-const TEXELS_PER_FILTER: u32 = FILTER_SIZE_U32 / 4u;
-
 const FILTER_TYPE_OFFSET: u32 = 0u;
 const FILTER_TYPE_FLOOD: u32 = 1u;
 const FILTER_TYPE_GAUSSIAN_BLUR: u32 = 2u;
