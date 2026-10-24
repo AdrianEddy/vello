@@ -7,7 +7,7 @@ use vello_common::fearless_simd::Level;
 use vello_common::flatten::Line;
 use vello_common::kurbo::{Affine, Rect, Shape};
 use vello_common::peniko::Fill;
-use vello_common::strip_generator::{StripGenerator, StripStorage};
+use vello_common::strip_generator::{CoverageTransfer, StripGenerator, StripStorage};
 use vello_common::tile::Tiles;
 
 pub fn shift_lines_50_percent(lines: &[Line]) -> Vec<Line> {
@@ -156,6 +156,7 @@ pub fn render_rect(c: &mut Criterion) {
                     Fill::NonZero,
                     Affine::IDENTITY,
                     None,
+                    CoverageTransfer::IDENTITY,
                     &mut storage,
                     None,
                 );

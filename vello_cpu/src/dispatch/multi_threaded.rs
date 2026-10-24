@@ -35,7 +35,9 @@ use vello_common::paint::{ImageResolver, Paint, PremulColor};
 use vello_common::pixmap::PixmapMut;
 use vello_common::record::{CommandRecorder, LayerClip, LayerProps, PoppedLayer};
 use vello_common::strip::Strip;
-use vello_common::strip_generator::{GenerationMode, StripGenerator, StripStorage};
+use vello_common::strip_generator::{
+    CoverageTransfer, GenerationMode, StripGenerator, StripStorage,
+};
 
 mod cost;
 mod worker;
@@ -472,6 +474,7 @@ impl Dispatcher for MultiThreadedDispatcher {
         paint: Paint,
         blend_mode: BlendMode,
         aliasing_threshold: Option<u8>,
+        coverage_transfer: CoverageTransfer,
         mask: Option<Mask>,
     ) {
         let start = self.allocation_group.path.len() as u32;
@@ -484,6 +487,7 @@ impl Dispatcher for MultiThreadedDispatcher {
             fill_rule,
             blend_mode,
             aliasing_threshold,
+            coverage_transfer,
             mask,
         });
     }
@@ -849,6 +853,7 @@ pub(crate) enum RenderTaskType {
         fill_rule: Fill,
         blend_mode: BlendMode,
         aliasing_threshold: Option<u8>,
+        coverage_transfer: CoverageTransfer,
         mask: Option<Mask>,
     },
     StrokePath {
@@ -948,6 +953,7 @@ mod tests {
     use crate::kurbo::{Affine, Rect, Shape};
     use crate::peniko::{BlendMode, Fill};
     use vello_common::paint::{Paint, PremulColor};
+    use vello_common::strip_generator::CoverageTransfer;
 
     /// Ensure we don't cause a memory leak.
     #[test]
@@ -961,6 +967,7 @@ mod tests {
                 Paint::Solid(PremulColor::from_alpha_color(BLUE)),
                 BlendMode::default(),
                 None,
+                CoverageTransfer::IDENTITY,
                 None,
             );
             dispatcher.flush();

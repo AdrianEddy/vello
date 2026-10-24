@@ -12,6 +12,14 @@ Subheadings to categorize changes are `added, changed, deprecated, removed, fixe
 
 This release has an [MSRV][] of 1.89.
 
+### Added
+
+- `GlyphRunBuilder::coverage_transfer` for remapping the coverage of filled outline glyphs, and `DrawSink::fill_path_with_transfer` for renderers to support it. (by [@AdrianEddy][])
+
+### Changed
+
+- Breaking change: `GlyphCacheKey` has a `coverage_transfer` field and `AtlasCommand` has a `FillPathWithTransfer` variant. (by [@AdrianEddy][])
+
 ### Fixed
 
 - Glyph placement flipping by a pixel at integer and half-pixel origins under float rounding noise; hinted baselines at negative halves now round up like positive ones. ([#1785][] by [@AdrianEddy][])

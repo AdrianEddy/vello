@@ -10,7 +10,7 @@ use crate::util::{
     layout_glyphs_noto_cbtf, layout_glyphs_noto_colr, layout_glyphs_roboto,
     stops_blue_green_red_yellow,
 };
-use glifo::{FontEmbolden, Glyph};
+use glifo::{CoverageTransfer, FontEmbolden, Glyph};
 use std::f64::consts::FRAC_PI_4;
 use std::iter;
 use std::sync::Arc;
@@ -197,6 +197,35 @@ fn glyphs_emboldened(ctx: &mut impl Renderer) {
         .hint(true)
         .fill_glyphs(glyphs.into_iter())
         .unwrap();
+}
+
+/// Dark text on a light background and light text on a dark one, each without and with a coverage
+/// transfer.
+#[vello_test(width = 240, height = 64, glyph)]
+fn glyphs_filled_coverage_transfer(ctx: &mut impl Renderer, enable_caching: bool) {
+    let font_size = 13.0_f32;
+    let (font, glyphs) = layout_glyphs_roboto("Hamburgefonstiv", font_size);
+
+    ctx.set_paint(BLACK);
+    ctx.fill_rect(&Rect::new(120.0, 0.0, 240.0, 64.0));
+
+    let sharpen = CoverageTransfer::new(0.6, 0.0);
+    let sharpen_and_thicken = CoverageTransfer::new(0.6, 0.4);
+    for (x, y, color, transfer) in [
+        (4.0, 24.0, BLACK, CoverageTransfer::IDENTITY),
+        (4.0, 52.0, BLACK, sharpen),
+        (124.0, 24.0, WHITE, CoverageTransfer::IDENTITY),
+        (124.0, 52.0, WHITE, sharpen_and_thicken),
+    ] {
+        ctx.set_transform(Affine::translate((x, y)));
+        ctx.set_paint(color);
+        ctx.glyph_run(&font)
+            .font_size(font_size)
+            .atlas_cache(enable_caching)
+            .coverage_transfer(transfer)
+            .fill_glyphs(glyphs.iter().copied())
+            .unwrap();
+    }
 }
 
 #[vello_test(width = 300, height = 70, glyph)]

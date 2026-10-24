@@ -16,6 +16,7 @@ use core::hash::{Hash, Hasher};
 use core_maths::CoreFloat as _;
 use skrifa::instance::NormalizedCoord;
 use smallvec::SmallVec;
+use vello_common::strip_generator::CoverageTransfer;
 
 /// Number of horizontal subpixel quantization buckets (valid range: 1–253).
 ///
@@ -75,12 +76,14 @@ pub struct GlyphCacheKey {
     pub embolden_miter_limit_bits: u32,
     /// Tolerance for synthetic embolden. Only meaningful for outline glyphs.
     pub embolden_tolerance_bits: u32,
+    /// Coverage transfer applied when rasterizing. Only non-identity for outline glyphs.
+    pub coverage_transfer: CoverageTransfer,
     /// Variation coordinates for variable fonts.
     pub var_coords: SmallVec<[NormalizedCoord; 4]>,
 }
 
 impl GlyphCacheKey {
-    /// Creates a new cache key.
+    /// Creates a new cache key with an identity coverage transfer.
     ///
     /// `fractional_x` (the fractional pixel offset) is quantized into
     /// `SUBPIXEL_BUCKETS` buckets, so nearby positions share the same entry.
@@ -111,6 +114,7 @@ impl GlyphCacheKey {
             embolden_join_bits: join_bits(embolden.join),
             embolden_miter_limit_bits: f32_bits(embolden.miter_limit),
             embolden_tolerance_bits: f32_bits(embolden.tolerance),
+            coverage_transfer: CoverageTransfer::IDENTITY,
             var_coords: SmallVec::from_slice(var_coords),
         }
     }
@@ -135,6 +139,7 @@ impl Hash for GlyphCacheKey {
         self.embolden_join_bits.hash(state);
         self.embolden_miter_limit_bits.hash(state);
         self.embolden_tolerance_bits.hash(state);
+        self.coverage_transfer.hash(state);
     }
 }
 
@@ -153,6 +158,7 @@ impl PartialEq for GlyphCacheKey {
             && self.embolden_join_bits == other.embolden_join_bits
             && self.embolden_miter_limit_bits == other.embolden_miter_limit_bits
             && self.embolden_tolerance_bits == other.embolden_tolerance_bits
+            && self.coverage_transfer == other.coverage_transfer
     }
 }
 
@@ -326,6 +332,7 @@ mod tests {
             embolden_join_bits: join_bits(Join::Miter),
             embolden_miter_limit_bits: 4.0_f32.to_bits(),
             embolden_tolerance_bits: 0.1_f32.to_bits(),
+            coverage_transfer: CoverageTransfer::IDENTITY,
             var_coords: SmallVec::new(),
         };
         let bitmap_key = GlyphCacheKey {
@@ -342,11 +349,41 @@ mod tests {
             embolden_join_bits: join_bits(Join::Miter),
             embolden_miter_limit_bits: 4.0_f32.to_bits(),
             embolden_tolerance_bits: 0.1_f32.to_bits(),
+            coverage_transfer: CoverageTransfer::IDENTITY,
             var_coords: SmallVec::new(),
         };
         assert_ne!(outline_key, colr_key);
         assert_ne!(outline_key, bitmap_key);
         assert_ne!(colr_key, bitmap_key);
+    }
+
+    #[test]
+    fn test_coverage_transfer_in_equality() {
+        let packed = pack_color(BLACK);
+        let identity = GlyphCacheKey::new(
+            1,
+            0,
+            42,
+            16.0,
+            true,
+            0.3,
+            BLACK,
+            packed,
+            FontEmbolden::default(),
+            &[],
+        );
+        assert_eq!(identity.coverage_transfer, CoverageTransfer::IDENTITY);
+        let sharpened = GlyphCacheKey {
+            coverage_transfer: CoverageTransfer::new(0.5, 0.0),
+            ..identity.clone()
+        };
+        let thickened = GlyphCacheKey {
+            coverage_transfer: CoverageTransfer::new(0.0, 0.5),
+            ..identity.clone()
+        };
+        assert_ne!(identity, sharpened);
+        assert_ne!(identity, thickened);
+        assert_ne!(sharpened, thickened);
     }
 
     #[test]

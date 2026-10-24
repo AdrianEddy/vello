@@ -22,6 +22,7 @@ use crate::color::{AlphaColor, Srgb};
 use crate::kurbo::{Affine, BezPath, Rect};
 use crate::peniko::{BlendMode, Gradient};
 use vello_common::paint::PaintType;
+use vello_common::strip_generator::CoverageTransfer;
 
 /// Paint type for atlas commands.
 #[derive(Clone, Debug)]
@@ -68,6 +69,9 @@ pub enum AtlasCommand {
     SetPaintTransform(Affine),
     /// Fill a path with the current paint and transform.
     FillPath(Arc<BezPath>),
+    /// Fill a path with the current paint and transform, mapping its coverage through a
+    /// transfer.
+    FillPathWithTransfer(Arc<BezPath>, CoverageTransfer),
     /// Fill a rectangle with the current paint and transform.
     FillRect(Rect),
     /// Push a clip layer defined by a path.
@@ -138,6 +142,14 @@ impl DrawSink for AtlasCommandRecorder {
     fn fill_path(&mut self, path: &BezPath) {
         self.commands
             .push(AtlasCommand::FillPath(Arc::new(path.clone())));
+    }
+
+    #[inline]
+    fn fill_path_with_transfer(&mut self, path: &BezPath, transfer: CoverageTransfer) {
+        self.commands.push(AtlasCommand::FillPathWithTransfer(
+            Arc::new(path.clone()),
+            transfer,
+        ));
     }
 
     #[inline]

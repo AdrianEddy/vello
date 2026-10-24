@@ -6,7 +6,7 @@
 use crate::geometry::RectU16;
 use crate::kurbo::{Affine, BezPath, PathEl, Rect};
 use crate::strip::Strip;
-use crate::strip_generator::{GenerationMode, StripGenerator, StripStorage};
+use crate::strip_generator::{CoverageTransfer, GenerationMode, StripGenerator, StripStorage};
 use crate::tile::Tile;
 use crate::util::{Clear, Pool, narrow, normalized_mul_u8, strip_bbox};
 use alloc::vec;
@@ -103,6 +103,7 @@ impl ClipContext {
                 fill_rule,
                 transform,
                 aliasing_threshold,
+                CoverageTransfer::IDENTITY,
                 storage,
                 existing_clip.map(|clip| clip.path),
             );

@@ -17,10 +17,12 @@ This release has an [MSRV][] of 1.89.
 - `filter::color_matrix::ColorMatrix`, `PreparedFilter::ColorMatrix` and a `ProbeFeature::ColorMatrix` probe element. ([#1765][] by [@AdrianEddy][], [@waywardmonkeys][])
 - `MultiAtlasManager::allocated_count`. (by [@AdrianEddy][])
 - `GlyphMaintenance`, for choosing whether renderers age their glyph caches after every render or only when asked to. ([#1788][] by [@AdrianEddy][])
+- `CoverageTransfer`, which remaps the coverage of filled paths during strip generation. (by [@AdrianEddy][])
 
 ### Changed
 
 - Breaking change: `MultiAtlasManager::try_allocate` rejects an empty size with the new `AtlasError::EmptyTexture` instead of adding atlases until `max_atlases` is reached. (by [@AdrianEddy][])
+- Breaking change: `StripGenerator::generate_filled_path` takes a `CoverageTransfer`. (by [@AdrianEddy][])
 
 ### Optimized
 

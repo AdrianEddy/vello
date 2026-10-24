@@ -20,6 +20,7 @@ This release has an [MSRV][] of 1.89.
 - `Resources::atlas_allocation_count`. (by [@AdrianEddy][])
 - `Scene::transform`, as `RenderContext::transform` in Vello CPU. (by [@AdrianEddy][])
 - `Resources::set_glyph_maintenance`, `Renderer::maintain_glyphs` and `WebGlRenderer::maintain_glyphs`, for aging the glyph caches once per frame instead of after every render. ([#1788][] by [@AdrianEddy][])
+- Support for coverage transfers on glyph runs (`GlyphRunBuilder::coverage_transfer`). (by [@AdrianEddy][])
 
 ### Changed
 

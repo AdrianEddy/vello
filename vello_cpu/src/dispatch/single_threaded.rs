@@ -24,7 +24,7 @@ use vello_common::pixmap::{Pixmap, PixmapMut};
 use vello_common::record::{
     CommandRecorder, LayerClip, LayerProps, Node, PoppedLayer, RecordedLayerKind,
 };
-use vello_common::strip_generator::{GenerationMode, StripStorage};
+use vello_common::strip_generator::{CoverageTransfer, GenerationMode, StripStorage};
 use vello_common::util::strip_bbox;
 use vello_common::viewport::ViewportState;
 
@@ -296,6 +296,7 @@ impl Dispatcher for SingleThreadedDispatcher {
         paint: Paint,
         blend_mode: BlendMode,
         aliasing_threshold: Option<u8>,
+        coverage_transfer: CoverageTransfer,
         mask: Option<Mask>,
     ) {
         let strip_start = self.strip_storage.strips.len();
@@ -307,6 +308,7 @@ impl Dispatcher for SingleThreadedDispatcher {
                     fill_rule,
                     transform,
                     aliasing_threshold,
+                    coverage_transfer,
                     strip_storage,
                     clip_path.map(|clip| clip.path),
                 );
@@ -381,6 +383,7 @@ impl Dispatcher for SingleThreadedDispatcher {
                         fill_rule,
                         clip_transform,
                         aliasing_threshold,
+                        CoverageTransfer::IDENTITY,
                         strip_storage,
                         existing_clip.map(|clip| clip.path),
                     );
@@ -569,6 +572,7 @@ mod tests {
             Paint::Solid(PremulColor::from_alpha_color(BLUE)),
             BlendMode::default(),
             None,
+            CoverageTransfer::IDENTITY,
             None,
         );
 

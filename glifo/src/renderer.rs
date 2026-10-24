@@ -23,6 +23,7 @@ use peniko::color::palette::css::BLACK;
 use peniko::color::{AlphaColor, Srgb};
 use peniko::{Extend, ImageQuality, ImageSampler};
 use vello_common::paint::{Image, ImageSource, Tint, TintMode};
+use vello_common::strip_generator::CoverageTransfer;
 
 /// Outcome of a cache-first render attempt.
 ///
@@ -40,9 +41,13 @@ enum CacheResult {
 
 /// Fill a prepared glyph, using the glyph atlas when possible and falling
 /// back to direct rendering otherwise.
+///
+/// Outline glyphs drawn directly get `coverage_transfer`. Outline glyphs drawn from the atlas
+/// are rasterized with the transfer of their cache key.
 pub(crate) fn fill_glyph(
     renderer: &mut impl GlyphRenderer,
     prepared_glyph: PreparedGlyph<'_>,
+    coverage_transfer: CoverageTransfer,
     atlas_cacher: &mut AtlasCacher<'_>,
     outline_cache: &mut OutlineCacheSession<'_>,
 ) {
@@ -58,6 +63,7 @@ pub(crate) fn fill_glyph(
                     glyph.scale,
                     transform,
                     paint_transform,
+                    coverage_transfer,
                 );
             }
             GlyphType::Bitmap(glyph) => render_uncached_bitmap_glyph(renderer, glyph, transform),
@@ -101,6 +107,7 @@ pub(crate) fn fill_glyph(
                 glyph.scale,
                 transform,
                 paint_transform,
+                coverage_transfer,
             );
         }
         GlyphType::Bitmap(glyph) => {
@@ -162,7 +169,13 @@ pub(crate) fn stroke_glyph(
                 );
             }
             GlyphType::Bitmap(_) | GlyphType::Colr(_) => {
-                fill_glyph(renderer, prepared_glyph, atlas_cacher, outline_cache);
+                fill_glyph(
+                    renderer,
+                    prepared_glyph,
+                    CoverageTransfer::IDENTITY,
+                    atlas_cacher,
+                    outline_cache,
+                );
             }
         };
     };
@@ -197,7 +210,13 @@ pub(crate) fn stroke_glyph(
             );
         }
         GlyphType::Bitmap(_) | GlyphType::Colr(_) => {
-            fill_glyph(renderer, prepared_glyph, atlas_cacher, outline_cache);
+            fill_glyph(
+                renderer,
+                prepared_glyph,
+                CoverageTransfer::IDENTITY,
+                atlas_cacher,
+                outline_cache,
+            );
         }
     }
 }
@@ -208,11 +227,12 @@ fn fill_uncached_outline_glyph(
     scale: f64,
     outline_transform: Affine,
     paint_transform: Affine,
+    coverage_transfer: CoverageTransfer,
 ) {
     let state = renderer.save_state();
     renderer.set_transform(outline_transform.pre_scale(scale));
     renderer.set_paint_transform(paint_transform);
-    renderer.fill_path(path);
+    renderer.fill_path_with_transfer(path, coverage_transfer);
     renderer.restore_state(state);
 }
 
@@ -343,6 +363,7 @@ fn render_outline_to_atlas(
     path: &Arc<BezPath>,
     scale: f64,
     subpixel_offset: f32,
+    coverage_transfer: CoverageTransfer,
     recorder: &mut AtlasCommandRecorder,
     atlas_slot: AtlasSlot,
     raster_metrics: RasterMetrics,
@@ -354,7 +375,7 @@ fn render_outline_to_atlas(
         ));
     recorder.set_transform(outline_transform);
     recorder.set_paint(BLACK.into());
-    recorder.fill_path(path);
+    recorder.fill_path_with_transfer(path, coverage_transfer);
 }
 
 /// Record COLR glyph draw commands into the atlas command recorder.
@@ -410,6 +431,7 @@ fn insert_and_render_outline(
     let raster_metrics = calculate_raster_metrics(&bounds);
 
     let subpixel_offset = subpixel_offset(cache_key.subpixel_x);
+    let coverage_transfer = cache_key.coverage_transfer;
 
     let Some((atlas_slot, recorder)) = glyph_atlas.insert(image_cache, cache_key, raster_metrics)
     else {
@@ -420,6 +442,7 @@ fn insert_and_render_outline(
         &glyph.path,
         glyph.scale,
         subpixel_offset,
+        coverage_transfer,
         recorder,
         atlas_slot,
         raster_metrics,
@@ -637,6 +660,7 @@ pub fn replay_atlas_commands(commands: &mut Vec<AtlasCommand>, target: &mut impl
             AtlasCommand::SetPaint(p) => target.set_paint(p),
             AtlasCommand::SetPaintTransform(t) => target.set_paint_transform(t),
             AtlasCommand::FillPath(p) => target.fill_path(&p),
+            AtlasCommand::FillPathWithTransfer(p, t) => target.fill_path_with_transfer(&p, t),
             AtlasCommand::FillRect(r) => target.fill_rect(&r),
             AtlasCommand::PushClipLayer(c) => target.push_clip_layer(&c),
             AtlasCommand::PushClipPath(c) => target.push_clip_path(&c),

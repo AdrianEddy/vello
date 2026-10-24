@@ -14,6 +14,7 @@ use vello_common::filter::FilterData;
 use vello_common::mask::Mask;
 use vello_common::paint::{ImageResolver, Paint};
 use vello_common::pixmap::PixmapMut;
+use vello_common::strip_generator::CoverageTransfer;
 
 pub(crate) trait Dispatcher: Debug + Send {
     fn has_layers(&self) -> bool;
@@ -25,6 +26,7 @@ pub(crate) trait Dispatcher: Debug + Send {
         paint: Paint,
         blend_mode: BlendMode,
         aliasing_threshold: Option<u8>,
+        coverage_transfer: CoverageTransfer,
         mask: Option<Mask>,
     );
     fn stroke_path(
