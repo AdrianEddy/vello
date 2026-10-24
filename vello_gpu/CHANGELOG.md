@@ -34,6 +34,8 @@ This release has an [MSRV][] of 1.89.
 - Images uploaded and glyphs cached into the atlas region of a destroyed image are no longer erased by that region's clear. ([#1739][] by [@AdrianEddy][])
 - The wgpu renderer returns `RenderError::MissingImage` for an image that isn't in the atlas instead of panicking. (by [@AdrianEddy][])
 - `ClearSettings::Rects` clears now use the unquantized premultiplied color, like viewport clears, instead of an RGBA8 approximation. (by [@AdrianEddy][])
+- Draws disappearing once a target received more than 2^24 + 1 opaque draws; opaque draws after the first 2^24 - 1 now use the alpha pass. (by [@AdrianEddy][])
+- Rectangles drawn as quads now have exactly the coverage of the strip renderer and `vello_cpu`, so a clip path no longer changes the coverage of rectangles it does not cut. ([#1784][] by [@AdrianEddy][])
 
 ## [0.3.0][] - 2026-10-02
 
@@ -379,6 +381,7 @@ See also the [vello_cpu 0.0.4](../vello_cpu/CHANGELOG.md#004---2025-10-17) and [
 [#1778]: https://github.com/linebender/vello/pull/1778
 [#1779]: https://github.com/linebender/vello/pull/1779
 [#1781]: https://github.com/linebender/vello/pull/1781
+[#1784]: https://github.com/linebender/vello/pull/1784
 [#1788]: https://github.com/linebender/vello/pull/1788
 [#1791]: https://github.com/linebender/vello/pull/1791
 [#1792]: https://github.com/linebender/vello/pull/1792

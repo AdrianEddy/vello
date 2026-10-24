@@ -23,7 +23,7 @@
 // - If color source is layer, the fragment shader samples the layer texture and applies layer opacity.
 // More details in the `StripInstance` documentation below.
 
-import package::helpers::alpha::sample_strip_alpha;
+import package::helpers::alpha::{alpha_to_f32, rect_alpha, sample_strip_alpha};
 @if(blurred_rounded_rect)
 import package::helpers::blurred_rounded_rect::{
     get_blurred_rounded_rect_sample_xy,
@@ -39,7 +39,7 @@ import package::helpers::gradient::sample_linear_gradient;
 import package::helpers::gradient::sample_radial_gradient;
 @if(gradient_sweep)
 import package::helpers::gradient::sample_sweep_gradient;
-import package::helpers::geometry::{pixel_to_ndc, quad_corner, rect_coverage};
+import package::helpers::geometry::{pixel_to_ndc, quad_corner};
 @if(full_image_support)
 import package::helpers::image::{get_image_transform, get_image_translate};
 import package::helpers::image::{
@@ -69,6 +69,9 @@ const PAINT_TYPE_WGPU_EXTERNAL_TEXTURE: u32 = 7u;
 const EXTERNAL_TEXTURE_SLOT_SHIFT: u32 = 24u;
 
 const RECT_STRIP_FLAG: u32 = 0x80000000u;
+
+// Number of low bits of `StripInstance::depth_index` that hold the painter's-order index.
+const DEPTH_INDEX_BITS: u32 = 24u;
 
 struct Config {
     // Width of the rendering target
@@ -107,9 +110,10 @@ struct Config {
 //   ----------------------+-----------------------------------+-----------------------------------
 //   xy                    | Strip position                    | Rect top-left (snapped outward)
 //   widths_or_rect_height | [width, dense_width]              | [width, height] (both snapped)
-//   col_idx_or_rect_frac  | Alpha column index                | Packed AA edge fractions (4 × u8)
+//   col_idx_or_rect_frac  | Alpha column index                | Boundary pixel alphas (4 × u8)
 //   payload               | Color / scene coords / layer xy   | Color / scene coords / layer xy
 //   paint_and_rect_flag   | Paint encoding                    | Paint encoding | RECT_STRIP_FLAG
+//   depth_index           | Painter's-order index             | Painter's-order index | corner corrections << 24
 //
 //
 // `paint_and_rect_flag` bit layout:
@@ -172,13 +176,14 @@ struct StripInstance {
     @location(1) widths_or_rect_height: u32,
     // For normal strips: alpha texture column index where this strip's alpha values begin.
     // There are [`Config::strip_height`] alpha values per column.
-    // For rect strips: packed fractional edge offsets for AA.
+    // For rect strips: the alphas of the boundary pixels (see `rect_alpha`).
     @location(2) col_idx_or_rect_frac: u32,
     // See StripInstance documentation above.
     @location(3) payload: u32,
     // See StripInstance documentation above.
     @location(4) paint_and_rect_flag: u32,
-    // Painter's-order index for z-depth computation.
+    // Painter's-order index for z-depth computation, in the low `DEPTH_INDEX_BITS` bits.
+    // For rect strips, the bits above hold the corner corrections of `rect_alpha`.
     @location(5) depth_index: u32,
 }
 
@@ -197,11 +202,14 @@ struct VertexOutput {
     // Packed paint payload or layer sample coordinate.
     @interpolate(flat)
     @location(4) payload: u32,
-    // Packed fractional edge offsets for rectangles.
-    // Bits 0-7: x0, 8-15: y0, 16-23: x1, 24-31: y1.
+    // Boundary pixel alphas for rectangles (see `rect_alpha`).
     // Zero for normal strips.
     @interpolate(flat)
-    @location(5) rect_frac: u32,
+    @location(5) rect_alphas: u32,
+    // Corner corrections for rectangles (see `rect_alpha`).
+    // Zero for normal strips.
+    @interpolate(flat)
+    @location(6) rect_corner_corrections: u32,
     // Normalized device coordinates (NDC) for the current vertex
     @builtin(position) position: vec4<f32>,
 }
@@ -249,10 +257,12 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32, instance: StripInstance)
     if is_rect {
         height = dense_width;
         out.dense_end_or_rect_size = width | (dense_width << 16u);
-        out.rect_frac = instance.col_idx_or_rect_frac;
+        out.rect_alphas = instance.col_idx_or_rect_frac;
+        out.rect_corner_corrections = instance.depth_index >> DEPTH_INDEX_BITS;
     } else {
         out.dense_end_or_rect_size = instance.col_idx_or_rect_frac + dense_width;
-        out.rect_frac = 0u;
+        out.rect_alphas = 0u;
+        out.rect_corner_corrections = 0u;
     }
     // Calculate the pixel coordinates of the current vertex within the strip.
     // Don't forget to apply the strip offset!
@@ -366,7 +376,8 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32, instance: StripInstance)
 
     // Divide by a power of 2 to ensure exact f32 arithmetic (and divide by the expected depth
     // buffer precision of 24 bits).
-    let z = 1.0 - f32(instance.depth_index) / f32(1u << 24u);
+    let depth_index = instance.depth_index & ((1u << DEPTH_INDEX_BITS) - 1u);
+    let z = 1.0 - f32(depth_index) / f32(1u << DEPTH_INDEX_BITS);
     // Flip it based on the flag.
     let final_ndc_y = select(ndc.y, -ndc.y, config.ndc_y_negate != 0u);
     out.position = vec4<f32>(ndc.x, final_ndc_y, z, 1.0);
@@ -392,13 +403,17 @@ fn fs_main(
     @interpolate(flat)
     @location(4) payload: u32,
     @interpolate(flat)
-    @location(5) rect_frac: u32,
+    @location(5) rect_alphas: u32,
+    @interpolate(flat)
+    @location(6) rect_corner_corrections: u32,
     @builtin(position) position: vec4<f32>,
 ) -> @location(0) vec4<f32> {
     var alpha = 1.0;
     let is_rect = (paint_and_rect_flag & RECT_STRIP_FLAG) != 0u;
-    if is_rect && rect_frac != 0u {
-        alpha = rect_coverage(dense_end_or_rect_size, rect_frac, tex_coord);
+    if is_rect && (rect_alphas != 0xffffffffu || rect_corner_corrections != 0u) {
+        let rect_size = unpack_u16_pair(dense_end_or_rect_size);
+        let pixel = vec2<u32>(tex_coord);
+        alpha = alpha_to_f32(rect_alpha(rect_size, pixel, rect_alphas, rect_corner_corrections));
     } else if !is_rect && dense_end_or_rect_size != 0u {
         alpha = sample_strip_alpha(alphas_texture, config.alphas_tex_width_bits, tex_coord);
     }

@@ -1,10 +1,14 @@
 // Copyright 2026 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! Shared helpers for reading packed strip alpha values.
+//! Shared helpers for reading the packed alpha values of strips and rect strips.
 //!
 //! Alpha textures store 16 1-byte alpha values per texel, with each color
 //! channel packing the 4 alpha values of a single strip column.
+
+fn alpha_to_f32(alpha: u32) -> f32 {
+    return f32(alpha) * (1.0 / 255.0);
+}
 
 fn sample_strip_alpha(
     alphas_texture: texture_2d<u32>,
@@ -34,7 +38,7 @@ fn sample_strip_alpha(
     // Get the column's alphas from the appropriate RGBA channel based on the index
     let alphas_u32 = unpack_alphas_from_channel(rgba_values, channel_index);
     // Extract the alpha value for the current y-position from the packed u32 data
-    return f32((alphas_u32 >> (y * 8u)) & 0xffu) * (1.0 / 255.0);
+    return alpha_to_f32((alphas_u32 >> (y * 8u)) & 0xffu);
 }
 
 fn unpack_alphas_from_channel(rgba: vec4<u32>, channel_index: u32) -> u32 {
@@ -46,4 +50,40 @@ fn unpack_alphas_from_channel(rgba: vec4<u32>, channel_index: u32) -> u32 {
         // Fallback, should never happen
         default { return rgba.x; }
     }
+}
+
+// Returns the alpha of `pixel` in a rect strip of `size` pixels.
+//
+// `alphas` holds the alphas of the first column, last column, first row and last row, from the
+// low byte up. The alpha of a corner pixel is the rounded product of its column and row alpha plus
+// a correction of -1, 0 or 1, which `corner_corrections` holds as 2-bit two's complement values for
+// the top-left, top-right, bottom-left and bottom-right pixel, from the low bits up.
+fn rect_alpha(size: vec2<u32>, pixel: vec2<u32>, alphas: u32, corner_corrections: u32) -> u32 {
+    let first = pixel == vec2(0u);
+    let last = pixel == size - 1u;
+    var col_alpha = 255u;
+    if first.x {
+        col_alpha = alphas & 0xffu;
+    } else if last.x {
+        col_alpha = (alphas >> 8u) & 0xffu;
+    }
+    var row_alpha = 255u;
+    if first.y {
+        row_alpha = (alphas >> 16u) & 0xffu;
+    } else if last.y {
+        row_alpha = alphas >> 24u;
+    }
+    // round(col_alpha * row_alpha / 255)
+    let p = col_alpha * row_alpha + 128u;
+    var alpha = (p + (p >> 8u)) >> 8u;
+    if (first.x || last.x) && (first.y || last.y) {
+        let corner = select(1u, 0u, first.x) + select(2u, 0u, first.y);
+        let correction = (corner_corrections >> (2u * corner)) & 3u;
+        if correction == 1u {
+            alpha += 1u;
+        } else if correction == 3u {
+            alpha -= 1u;
+        }
+    }
+    return alpha;
 }
