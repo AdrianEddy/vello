@@ -15,6 +15,7 @@ This release has an [MSRV][] of 1.89.
 ### Added
 
 - Renderer probing in the wgpu backend through `Renderer::probe`, with the `probe` feature. (by [@LaurenzV][])
+- `Scene::transform`, as `RenderContext::transform` in Vello CPU. (by [@AdrianEddy][])
 
 ### Fixed
 
