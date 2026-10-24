@@ -12,6 +12,10 @@ Subheadings to categorize changes are `added, changed, deprecated, removed, fixe
 
 This release has an [MSRV][] of 1.89.
 
+### Added
+
+- `MultiAtlasManager::allocated_count`. (by [@AdrianEddy][])
+
 ### Changed
 
 - Breaking change: `MultiAtlasManager::try_allocate` rejects an empty size with the new `AtlasError::EmptyTexture` instead of adding atlases until `max_atlases` is reached. (by [@AdrianEddy][])

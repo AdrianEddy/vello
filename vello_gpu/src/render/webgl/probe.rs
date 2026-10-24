@@ -172,6 +172,7 @@ impl WebGlRenderer {
             &render_size,
             TargetInit::Clear(ClearSettings::Viewport { color: css::WHITE }),
             RootTarget::UserSurface,
+            None,
             &texture_bindings,
             Some(&probe_texture),
         );

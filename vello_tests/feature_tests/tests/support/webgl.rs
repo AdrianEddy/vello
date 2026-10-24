@@ -5,24 +5,31 @@ use super::{Pixmap, ProbeFeature, probe};
 use vello_common::{
     TextureId,
     color::palette::css,
+    kurbo::Rect,
     paint::{ImageSource, TextureRegion},
     peniko::ImageAlphaType,
     pixmap::PixelMetadata,
 };
-use vello_gpu::{RenderSettings, RenderSize, Scene, WebGlRenderer, WebGlTextureBindings};
+use vello_gpu::{
+    RenderSettings, RenderSize, Scene, WebGlError, WebGlRenderer, WebGlTextureBindings,
+};
 use wasm_bindgen::JsCast;
 use web_sys::{HtmlCanvasElement, WebGl2RenderingContext};
 
-pub(crate) fn render(elements: &[ProbeFeature]) -> Pixmap {
-    let (width, height) = probe::canvas_size(elements);
-    let canvas = web_sys::window()
+fn create_canvas() -> HtmlCanvasElement {
+    web_sys::window()
         .unwrap()
         .document()
         .unwrap()
         .create_element("canvas")
         .unwrap()
         .dyn_into::<HtmlCanvasElement>()
-        .unwrap();
+        .unwrap()
+}
+
+pub(crate) fn render(elements: &[ProbeFeature]) -> Pixmap {
+    let (width, height) = probe::canvas_size(elements);
+    let canvas = create_canvas();
 
     canvas.set_width(width.into());
     canvas.set_height(height.into());
@@ -113,4 +120,16 @@ pub(crate) fn render(elements: &[ProbeFeature]) -> Pixmap {
         height,
         PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, true),
     )
+}
+
+/// Renders a small scene into an atlas image.
+pub(crate) fn render_to_image() -> Result<(), WebGlError> {
+    let (mut renderer, mut resources) =
+        WebGlRenderer::new_with(&create_canvas(), RenderSettings::default(), true).unwrap();
+    let mut scene = Scene::new(4, 4);
+    scene.set_paint(css::RED);
+    scene.fill_rect(&Rect::new(0.0, 0.0, 4.0, 4.0));
+    renderer
+        .render_to_image(&scene, &mut resources, &WebGlTextureBindings::new())
+        .map(|_| ())
 }

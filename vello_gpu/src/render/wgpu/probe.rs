@@ -171,6 +171,7 @@ impl Renderer {
             &scene.encoded_paints,
             TargetInit::Clear(ClearSettings::Viewport { color: css::WHITE }),
             RootTarget::UserSurface,
+            None,
             &texture_bindings,
         )?;
 

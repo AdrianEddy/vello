@@ -8,13 +8,15 @@ use std::sync::MutexGuard;
 use glifo::GlyphCacheConfig;
 use vello_common::color::palette::css::{BLUE, GREEN, RED};
 use vello_common::color::{AlphaColor, Srgb};
-use vello_common::kurbo::{Affine, Rect};
+use vello_common::filter_effects::{EdgeMode, Filter, FilterPrimitive};
+use vello_common::kurbo::{Affine, Circle, Rect, Shape};
 use vello_common::paint::{Image, ImageId, ImageSource, TextureRegion};
-use vello_common::peniko::ImageSampler;
+use vello_common::peniko::{BlendMode, Compose, ImageSampler, Mix};
 use vello_common::pixmap::Pixmap;
 use vello_gpu::{
-    AtlasConfig, AtlasId, ClearSettings, MemorySettings, RenderError, RenderSettings, RenderSize,
-    RenderTargetConfig, Renderer, Resources, Scene, TargetInit, TextureBindings, TextureId,
+    AtlasConfig, AtlasError, AtlasId, ClearSettings, MemorySettings, RenderError, RenderSettings,
+    RenderSize, RenderTargetConfig, Renderer, Resources, Scene, TargetInit, TextureBindings,
+    TextureId,
 };
 use vello_tests::renderer::lock_wgpu_device;
 
@@ -212,6 +214,16 @@ impl Ctx {
             .flat_map(|row| row[..(width * 4) as usize].chunks_exact(4))
             .map(|pixel| [pixel[0], pixel[1], pixel[2], pixel[3]])
             .collect()
+    }
+
+    fn render_to_image(&mut self, scene: &Scene) -> Result<ImageId, RenderError> {
+        self.renderer.render_to_image(
+            scene,
+            &mut self.resources,
+            &self.device,
+            &self.queue,
+            &TextureBindings::new(),
+        )
     }
 
     fn read_target(&self) -> Vec<[u8; 4]> {
@@ -429,4 +441,197 @@ fn wgpu_atlas_evicted_glyphs_are_cleared() {
     }
 
     assert_eq!(count(&ctx.read_atlas(0), TRANSPARENT), 256 * 256);
+}
+
+/// The top-left `width`×`height` pixels of `pixels`, a target-sized readback.
+fn top_left(pixels: &[[u8; 4]], width: u16, height: u16) -> Vec<[u8; 4]> {
+    pixels
+        .chunks_exact(usize::from(SIZE))
+        .take(usize::from(height))
+        .flat_map(|row| &row[..usize::from(width)])
+        .copied()
+        .collect()
+}
+
+/// The top-left `width`×`height` pixels after rendering `scene` directly to the target.
+fn direct_render(scene: &Scene) -> Vec<[u8; 4]> {
+    let mut ctx = Ctx::new(64, 1);
+    ctx.render(scene);
+    top_left(&ctx.read_target(), scene.width(), scene.height())
+}
+
+/// The top-left pixels after drawing `id` at its size, `width`×`height`.
+fn draw_image(ctx: &mut Ctx, id: ImageId, width: u16, height: u16) -> Vec<[u8; 4]> {
+    let mut scene = Scene::new(SIZE, SIZE);
+    scene.set_paint(Image {
+        image: ImageSource::opaque_id(id),
+        sampler: ImageSampler::default(),
+    });
+    scene.fill_rect(&Rect::new(0.0, 0.0, f64::from(width), f64::from(height)));
+    ctx.render(&scene);
+    top_left(&ctx.read_target(), width, height)
+}
+
+/// A scene with root opacity, blend and filter layers, whose content reaches past its bounds.
+fn layered_scene(width: u16, height: u16) -> Scene {
+    let mut scene = Scene::new(width, height);
+    scene.set_paint(BLUE);
+    scene.fill_rect(&Rect::new(2.0, 2.0, 20.0, 9.0));
+    scene.push_opacity_layer(0.5);
+    scene.set_paint(RED);
+    scene.fill_path(&Circle::new((10.0, 10.0), 9.0).to_path(0.1));
+    scene.pop_layer();
+    scene.push_blend_layer(BlendMode::new(Mix::Multiply, Compose::SrcOver));
+    scene.set_paint(GREEN);
+    scene.fill_rect(&Rect::new(5.0, 0.0, 15.0, 30.0));
+    scene.pop_layer();
+    scene.push_filter_layer(Filter::from_primitive(FilterPrimitive::GaussianBlur {
+        std_deviation: 2.0,
+        edge_mode: EdgeMode::None,
+    }));
+    scene.set_paint(BLUE);
+    scene.fill_rect(&Rect::new(12.0, 12.0, 40.0, 40.0));
+    scene.pop_layer();
+    scene
+}
+
+/// An image rendered from a scene with layers, at an offset in the atlas, looks like the scene.
+#[test]
+fn wgpu_atlas_render_to_image_matches_scene() {
+    let (width, height) = (21, 17);
+    let expected = direct_render(&layered_scene(width, height));
+
+    let mut ctx = Ctx::new(64, 1);
+    ctx.upload(7, GREEN);
+    let id = ctx.render_to_image(&layered_scene(width, height)).unwrap();
+
+    assert_eq!(draw_image(&mut ctx, id, width, height), expected);
+}
+
+/// Rendering into an atlas region writes nothing outside it, even where the scene's content
+/// reaches past the scene's bounds.
+#[test]
+fn wgpu_atlas_render_to_image_is_confined() {
+    // A red circle that covers the whole 13×13 scene and more.
+    let mut scene = Scene::new(13, 13);
+    scene.set_paint(RED);
+    scene.fill_path(&Circle::new((6.5, 6.5), 12.0).to_path(0.1));
+    let direct_red = {
+        let mut direct = Ctx::new(64, 1);
+        direct.render(&scene);
+        count(&direct.read_target(), premul(RED))
+    };
+    assert!(
+        direct_red > 13 * 13,
+        "premise: rendering the scene directly draws past its bounds"
+    );
+
+    // The blue image fills the top half of the page, so the rendered image lands in the bottom.
+    let mut ctx = Ctx::new(32, 1);
+    let mut encoder = ctx.encoder();
+    ctx.renderer
+        .upload_image(
+            &mut ctx.resources,
+            &ctx.device,
+            &ctx.queue,
+            &mut encoder,
+            &{
+                let mut pixmap = Pixmap::new(32, 16);
+                pixmap.data_mut().fill(BLUE.premultiply().to_rgba8());
+                pixmap
+            },
+        )
+        .unwrap();
+    ctx.queue.submit([encoder.finish()]);
+    ctx.render_to_image(&scene).unwrap();
+
+    let page = ctx.read_atlas(0);
+    assert_eq!(count(&page, premul(BLUE)), 32 * 16);
+    assert_eq!(count(&page, premul(RED)), 13 * 13);
+    assert_eq!(count(&page, TRANSPARENT), 32 * 32 - 32 * 16 - 13 * 13);
+}
+
+/// An image rendered into the region of a destroyed opaque image keeps the scene's transparent
+/// pixels, without a render in between.
+#[test]
+fn wgpu_atlas_render_to_image_into_freed_region() {
+    let mut scene = Scene::new(16, 16);
+    scene.set_paint(BLUE.with_alpha(0.5));
+    scene.fill_rect(&Rect::new(0.0, 0.0, 8.0, 16.0));
+    let expected = direct_render(&scene);
+    assert_eq!(count(&expected, TRANSPARENT), 8 * 16, "premise");
+
+    // One page that fits one image.
+    let mut ctx = Ctx::new(16, 1);
+    let red = ctx.upload(16, RED);
+    ctx.resources.destroy_image(red);
+    let id = ctx.render_to_image(&scene).unwrap();
+
+    assert_eq!(draw_image(&mut ctx, id, 16, 16), expected);
+}
+
+/// Images can be rendered, destroyed and rendered again into one region without `render`.
+#[test]
+fn wgpu_atlas_render_to_image_reuses_destroyed_images() {
+    let mut scene = Scene::new(16, 16);
+    scene.set_paint(GREEN);
+    scene.fill_rect(&Rect::new(0.0, 0.0, 16.0, 16.0));
+
+    let mut ctx = Ctx::new(16, 1);
+    for _ in 0..4 {
+        let id = ctx.render_to_image(&scene).unwrap();
+        assert_eq!(ctx.resources.atlas_allocation_count(), 1);
+        assert!(ctx.resources.destroy_image(id));
+    }
+}
+
+/// A failed render releases its allocation at once.
+#[test]
+fn wgpu_atlas_render_to_image_failures_release_the_region() {
+    let missing = ImageId::new(99);
+    let mut failing = Scene::new(16, 16);
+    failing.set_paint(Image {
+        image: ImageSource::opaque_id(missing),
+        sampler: ImageSampler::default(),
+    });
+    failing.fill_rect(&Rect::new(0.0, 0.0, 16.0, 16.0));
+
+    // One page that fits one image, so a leaked allocation would make the next one fail.
+    let mut ctx = Ctx::new(16, 1);
+    for _ in 0..4 {
+        assert!(matches!(
+            ctx.render_to_image(&failing),
+            Err(RenderError::MissingImage(id)) if id == missing
+        ));
+    }
+    assert_eq!(ctx.resources.atlas_allocation_count(), 0);
+    ctx.render_to_image(&Scene::new(16, 16)).unwrap();
+}
+
+/// Rendering an image that doesn't fit in the atlas fails.
+#[test]
+fn wgpu_atlas_render_to_image_atlas_full() {
+    let mut ctx = Ctx::new(16, 1);
+    ctx.render_to_image(&Scene::new(16, 16)).unwrap();
+
+    assert!(matches!(
+        ctx.render_to_image(&Scene::new(4, 4)),
+        Err(RenderError::AtlasError(
+            AtlasError::AtlasLimitReached { .. }
+        ))
+    ));
+}
+
+/// The allocation count includes destroyed images until the next render frees them.
+#[test]
+fn wgpu_atlas_allocation_count() {
+    let mut ctx = Ctx::new(64, 1);
+    let red = ctx.upload(8, RED);
+    ctx.upload(8, BLUE);
+    assert_eq!(ctx.resources.atlas_allocation_count(), 2);
+
+    ctx.resources.destroy_image(red);
+    assert_eq!(ctx.resources.atlas_allocation_count(), 2);
+    ctx.render(&Scene::new(SIZE, SIZE));
+    assert_eq!(ctx.resources.atlas_allocation_count(), 1);
 }

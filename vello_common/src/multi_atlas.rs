@@ -411,6 +411,14 @@ impl MultiAtlasManager {
             .collect()
     }
 
+    /// Get the number of allocations in all atlases.
+    pub fn allocated_count(&self) -> u32 {
+        self.atlases
+            .iter()
+            .map(|atlas| atlas.stats.allocated_count)
+            .sum()
+    }
+
     /// Get the number of atlases.
     pub fn atlas_count(&self) -> usize {
         self.atlases.len()

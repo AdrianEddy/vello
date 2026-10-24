@@ -15,6 +15,8 @@ This release has an [MSRV][] of 1.89.
 ### Added
 
 - Renderer probing in the wgpu backend through `Renderer::probe`, with the `probe` feature. (by [@LaurenzV][])
+- `Renderer::render_to_image` and `WebGlRenderer::render_to_image`, which render a scene into a new atlas image. (by [@AdrianEddy][])
+- `Resources::atlas_allocation_count`. (by [@AdrianEddy][])
 
 ### Changed
 

@@ -45,11 +45,18 @@ impl Resources {
     /// Destroys an image, returning `false` if there is no image with this ID or it is already
     /// destroyed.
     ///
-    /// The renderer's next `render` call clears the image's atlas region and frees it. All GPU work
-    /// that reads or writes the image, including copies recorded by `upload_image`, must be
-    /// submitted before that call, and neither that render nor later ones may draw the image.
+    /// The renderer's next `render` or `render_to_image` call clears the image's atlas region and
+    /// frees it. All GPU work that reads or writes the image, including copies recorded by
+    /// `upload_image`, must be submitted before that call, and neither that render nor later ones
+    /// may draw the image.
     pub fn destroy_image(&mut self, image_id: ImageId) -> bool {
         self.image_cache.get(image_id).is_some() && self.destroyed_images.insert(image_id.as_u32())
+    }
+
+    /// Returns the number of allocated atlas regions: uploaded and rendered images, including
+    /// destroyed ones the next render hasn't freed yet, and cached glyphs.
+    pub fn atlas_allocation_count(&self) -> u32 {
+        self.image_cache.atlas_manager().allocated_count()
     }
 
     /// Frees the destroyed images and appends their atlas regions, including padding, to

@@ -538,6 +538,7 @@ impl WebGlRenderer {
             render_size,
             TargetInit::Clear(ClearSettings::Viewport { color: clear_color }),
             RootTarget::UserSurface,
+            None,
             texture_bindings,
             None,
         );
@@ -577,14 +578,32 @@ impl WebGlRenderer {
         atlas_id: AtlasId,
         texture_bindings: &WebGlTextureBindings,
     ) -> Result<(), WebGlError> {
+        let (width, height) = atlas_config.atlas_size;
+        self.render_to_atlas_region(
+            scene,
+            atlas_count,
+            RenderSize { width, height },
+            None,
+            atlas_id,
+            texture_bindings,
+        )
+    }
+
+    /// Renders `scene` into the atlas page `atlas_id`, placed at `viewport` if given.
+    ///
+    /// Leaves the view framebuffer bound, as `render` does.
+    fn render_to_atlas_region(
+        &mut self,
+        scene: &Scene,
+        atlas_count: u32,
+        atlas_render_size: RenderSize,
+        viewport: Option<RectU16>,
+        atlas_id: AtlasId,
+        texture_bindings: &WebGlTextureBindings,
+    ) -> Result<(), WebGlError> {
         self.programs
             .maybe_create_atlas_textures(&self.gl, atlas_count)?;
 
-        let (atlas_width, atlas_height) = atlas_config.atlas_size;
-        let atlas_render_size = RenderSize {
-            width: atlas_width,
-            height: atlas_height,
-        };
         let render_target_texture = self.atlas_texture(atlas_id).clone();
 
         let atlas_framebuffer = self
@@ -621,6 +640,7 @@ impl WebGlRenderer {
             &atlas_render_size,
             TargetInit::SrcOver,
             RootTarget::AtlasLayer,
+            viewport,
             texture_bindings,
             Some(&render_target_texture),
         );
@@ -634,8 +654,67 @@ impl WebGlRenderer {
         .into_framebuffer()
         .unwrap();
         self.programs.resources.atlas_render_framebuffer = Some(atlas_framebuffer);
+        self.gl.bind_framebuffer(
+            WebGl2RenderingContext::FRAMEBUFFER,
+            self.programs.resources.view_framebuffer.binding(),
+        );
 
         result
+    }
+
+    /// Renders `scene` into a new image in the image atlas and returns the image's ID.
+    ///
+    /// The image has the scene's size and is painted like an uploaded image, with
+    /// [`ImageSource::opaque_id`]. Destroy it with [`Resources::destroy_image`]; like
+    /// [`render`](Self::render), this call frees the images destroyed before it.
+    ///
+    /// The scene can't paint images from the atlas, which includes glyphs cached with
+    /// `atlas_cache(true)`: rendering such a scene fails with [`RenderError::MissingImage`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WebGlError::FullImageSupportDisabled`] if the `full_image_support` feature is
+    /// disabled, or an error if allocating or rendering the image fails.
+    pub fn render_to_image(
+        &mut self,
+        scene: &Scene,
+        resources: &mut Resources,
+        texture_bindings: &WebGlTextureBindings,
+    ) -> Result<ImageId, WebGlError> {
+        if !cfg!(feature = "full_image_support") {
+            return Err(WebGlError::FullImageSupportDisabled);
+        }
+
+        resources.free_destroyed_images(&mut self.atlas_clears);
+        self.clear_atlas_regions();
+
+        let (width, height) = (scene.width(), scene.height());
+        let image_id = resources
+            .image_cache
+            .allocate(width, height, IMAGE_PADDING)
+            .map_err(RenderError::AtlasError)?;
+        let image = resources.image_cache.get(image_id).unwrap();
+        let atlas_id = image.atlas_id;
+        let [x, y] = image.offset;
+        let region = RectU16::new(x, y, x + width, y + height);
+        let atlas_count = u32::try_from(resources.image_cache.atlas_count()).unwrap();
+        let result = self.render_to_atlas_region(
+            scene,
+            atlas_count,
+            RenderSize { width, height },
+            Some(region),
+            atlas_id,
+            texture_bindings,
+        );
+        if let Err(error) = result {
+            // The render may have drawn into the region before it failed.
+            resources.image_cache.deallocate(image_id);
+            self.atlas_clears.push((atlas_id, region));
+            self.clear_atlas_regions();
+            return Err(error);
+        }
+
+        Ok(image_id)
     }
 
     fn current_allocations(&self) -> IntermediateTextureAllocations {
@@ -660,6 +739,7 @@ impl WebGlRenderer {
         render_size: &RenderSize,
         target_init: TargetInit<'_>,
         root_output_target: RootTarget,
+        root_viewport: Option<RectU16>,
         texture_bindings: &WebGlTextureBindings,
         render_target_texture: Option<&WebGlTexture>,
     ) -> Result<(), WebGlError> {
@@ -724,6 +804,7 @@ impl WebGlRenderer {
             texture_bindings,
             scratch_buffers: &mut self.scratch_buffers,
             use_depth_buffer,
+            root_viewport,
         };
         if let TargetInit::Clear(clear) = target_init {
             ctx.clear_pass_inner(DrawPassTarget::Root(root_output_target), clear);
@@ -2704,6 +2785,8 @@ struct WebGlRendererContext<'a> {
     texture_bindings: &'a WebGlTextureBindings,
     scratch_buffers: &'a mut ScratchBuffers,
     use_depth_buffer: bool,
+    /// Where the root is placed in the target, if not at the origin.
+    root_viewport: Option<RectU16>,
 }
 
 fn checked_instance_count(value: usize) -> Result<i32, WebGlError> {
@@ -2859,7 +2942,17 @@ impl WebGlRendererContext<'_> {
                 );
                 let width = self.programs.render_size.width;
                 let height = self.programs.render_size.height;
-                self.gl.viewport(0, 0, i32::from(width), i32::from(height));
+                // Offscreen targets aren't flipped, so the viewport origin is the region's.
+                // Primitives are clipped to the viewport, which confines the render to it.
+                let (x, y) = self
+                    .root_viewport
+                    .map_or((0, 0), |viewport| (viewport.x0, viewport.y0));
+                self.gl.viewport(
+                    i32::from(x),
+                    i32::from(y),
+                    i32::from(width),
+                    i32::from(height),
+                );
 
                 self.gl.bind_buffer_base(
                     WebGl2RenderingContext::UNIFORM_BUFFER,

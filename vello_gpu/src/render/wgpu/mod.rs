@@ -399,6 +399,7 @@ impl Renderer {
             &scene.encoded_paints,
             target_init,
             RootTarget::UserSurface,
+            None,
             texture_bindings,
         );
 
@@ -439,17 +440,37 @@ impl Renderer {
         atlas_id: AtlasId,
         texture_bindings: &TextureBindings,
     ) -> Result<(), RenderError> {
+        let (width, height) = atlas_config.atlas_size;
+        self.render_to_atlas_region(
+            scene,
+            atlas_count,
+            RenderSize { width, height },
+            None,
+            device,
+            queue,
+            atlas_id,
+            texture_bindings,
+        )
+    }
+
+    /// Renders `scene` into the atlas page `atlas_id`, placed at `viewport` if given, and submits
+    /// the render.
+    fn render_to_atlas_region(
+        &mut self,
+        scene: &Scene,
+        atlas_count: u32,
+        atlas_render_size: RenderSize,
+        viewport: Option<RectU16>,
+        device: &Device,
+        queue: &Queue,
+        atlas_id: AtlasId,
+        texture_bindings: &TextureBindings,
+    ) -> Result<(), RenderError> {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Render to Atlas Encoder"),
         });
 
         Programs::maybe_create_atlas_textures(device, &mut self.programs.resources, atlas_count);
-
-        let (atlas_width, atlas_height) = atlas_config.atlas_size;
-        let atlas_render_size = RenderSize {
-            width: atlas_width,
-            height: atlas_height,
-        };
 
         let layer_view =
             self.programs.resources.atlas_texture_views[atlas_id.as_u32() as usize].clone();
@@ -471,6 +492,7 @@ impl Renderer {
             encoded_paints,
             TargetInit::SrcOver,
             RootTarget::AtlasLayer,
+            viewport,
             texture_bindings,
         );
         self.dummy_image_cache = Some(dummy_image_cache);
@@ -480,6 +502,64 @@ impl Renderer {
         queue.submit(Some(encoder.finish()));
 
         result
+    }
+
+    /// Renders `scene` into a new image in the image atlas and returns the image's ID.
+    ///
+    /// The image has the scene's size and is painted like an uploaded image, with
+    /// [`ImageSource::opaque_id`]. Destroy it with [`Resources::destroy_image`]; like
+    /// [`render`](Self::render), this call frees the images destroyed before it.
+    ///
+    /// The scene can't paint images from the atlas, which includes glyphs cached with
+    /// `atlas_cache(true)`: rendering such a scene fails with [`RenderError::MissingImage`].
+    ///
+    /// The render is submitted before this returns. Renders share buffers and textures written
+    /// through `queue`, so encoders passed to `render` must be submitted before this call.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `full_image_support` feature is disabled.
+    #[track_caller]
+    pub fn render_to_image(
+        &mut self,
+        scene: &Scene,
+        resources: &mut Resources,
+        device: &Device,
+        queue: &Queue,
+        texture_bindings: &TextureBindings,
+    ) -> Result<vello_common::paint::ImageId, RenderError> {
+        if !cfg!(feature = "full_image_support") {
+            panic!("rendered images require the `full_image_support` feature");
+        }
+
+        resources.free_destroyed_images(&mut self.atlas_clears);
+        self.clear_atlas_regions(device, queue);
+
+        let (width, height) = (scene.width(), scene.height());
+        let image_id = resources
+            .image_cache
+            .allocate(width, height, IMAGE_PADDING)?;
+        let image = resources.image_cache.get(image_id).unwrap();
+        let atlas_id = image.atlas_id;
+        let [x, y] = image.offset;
+        let atlas_count = u32::try_from(resources.image_cache.atlas_count()).unwrap();
+        let result = self.render_to_atlas_region(
+            scene,
+            atlas_count,
+            RenderSize { width, height },
+            Some(RectU16::new(x, y, x + width, y + height)),
+            device,
+            queue,
+            atlas_id,
+            texture_bindings,
+        );
+        if let Err(error) = result {
+            // Rendering fails before it writes anything, so the region is still transparent.
+            resources.image_cache.deallocate(image_id);
+            return Err(error);
+        }
+
+        Ok(image_id)
     }
 
     fn current_allocations(&self) -> IntermediateTextureAllocations {
@@ -509,6 +589,7 @@ impl Renderer {
         encoded_paints: &[EncodedPaint],
         target_init: TargetInit<'_>,
         root_output_target: RootTarget,
+        root_viewport: Option<RectU16>,
         texture_bindings: &TextureBindings,
     ) -> Result<(), RenderError> {
         self.programs.depth_cleared_this_frame = false;
@@ -582,6 +663,7 @@ impl Renderer {
             external_texture_bind_groups: HashMap::new(),
             scratch_buffers: &mut self.scratch_buffers,
             root_load_op: wgpu::LoadOp::Load,
+            root_viewport,
         };
 
         ctx.init_root_clear(target_init, root_output_target);
@@ -2748,6 +2830,8 @@ struct RendererContext<'a> {
     external_texture_bind_groups: HashMap<ExternalTextureBindings, BindGroup>,
     scratch_buffers: &'a mut ScratchBuffers,
     root_load_op: wgpu::LoadOp<wgpu::Color>,
+    /// Where the root is placed in the target, if not at the origin.
+    root_viewport: Option<RectU16>,
 }
 
 impl RendererContext<'_> {
@@ -2950,6 +3034,17 @@ impl RendererContext<'_> {
             timestamp_writes: None,
             multiview_mask: None,
         });
+        if let (DrawPassTarget::Root(_), Some(viewport)) = (target, self.root_viewport) {
+            // Primitives are clipped to the viewport, which confines the render to it.
+            render_pass.set_viewport(
+                f32::from(viewport.x0),
+                f32::from(viewport.y0),
+                f32::from(viewport.width()),
+                f32::from(viewport.height()),
+                0.0,
+                1.0,
+            );
+        }
         render_pass.set_bind_group(0, bind_group, &[]);
         render_pass.set_bind_group(2, &self.programs.resources.encoded_paints_bind_group, &[]);
         render_pass.set_bind_group(3, &self.programs.resources.gradient_bind_group, &[]);
