@@ -23,6 +23,7 @@ pub(crate) fn elements() -> Vec<ProbeFeature> {
     for &feature in probe::ALL_PROBE_ELEMENTS {
         let enabled = match feature {
             ProbeFeature::BlurredRoundedRect => Some(cfg!(feature = "blurred_rounded_rect")),
+            ProbeFeature::ColorMatrix => Some(cfg!(feature = "filter_color_matrix")),
             ProbeFeature::ImageBicubic => Some(cfg!(feature = "full_image_support")),
             ProbeFeature::SweepGradient => Some(cfg!(feature = "gradient_sweep")),
             _ => None,

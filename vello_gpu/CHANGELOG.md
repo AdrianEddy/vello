@@ -15,6 +15,7 @@ This release has an [MSRV][] of 1.89.
 ### Added
 
 - Renderer probing in the wgpu backend through `Renderer::probe`, with the `probe` feature. (by [@LaurenzV][])
+- Support for `FilterPrimitive::ColorMatrix`, behind the new `filter_color_matrix` shader feature (part of `all_shader_features`). ([#1765][] by [@AdrianEddy][], [@waywardmonkeys][])
 
 ### Fixed
 
@@ -357,6 +358,7 @@ See also the [vello_cpu 0.0.4](../vello_cpu/CHANGELOG.md#004---2025-10-17) and [
 [#1759]: https://github.com/linebender/vello/pull/1759
 [#1760]: https://github.com/linebender/vello/pull/1760
 [#1763]: https://github.com/linebender/vello/pull/1763
+[#1765]: https://github.com/linebender/vello/pull/1765
 [#1769]: https://github.com/linebender/vello/pull/1769
 [#1778]: https://github.com/linebender/vello/pull/1778
 [#1779]: https://github.com/linebender/vello/pull/1779

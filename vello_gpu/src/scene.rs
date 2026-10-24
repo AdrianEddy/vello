@@ -16,7 +16,7 @@ use vello_common::clip::{ClipRef, ClipShape};
 use vello_common::encode::{EncodeExt, EncodedPaint, invert_paint_transform};
 use vello_common::fearless_simd::Level;
 use vello_common::filter::FilterData;
-use vello_common::filter_effects::Filter;
+use vello_common::filter_effects::{Filter, FilterPrimitive};
 use vello_common::geometry::{RectU16, SizeU16};
 use vello_common::kurbo::{Affine, BezPath, Rect, Shape, Stroke};
 use vello_common::mask::Mask;
@@ -674,7 +674,9 @@ impl Scene {
     ///
     /// # Panics
     ///
-    /// Panics if `mask` is provided because mask layers are not yet supported.
+    /// Panics if `mask` is provided because mask layers are not yet supported, or if `filter`
+    /// is a color matrix filter and the `filter_color_matrix` feature is disabled.
+    #[track_caller]
     pub fn push_layer(
         &mut self,
         clip_path: Option<&BezPath>,
@@ -685,6 +687,9 @@ impl Scene {
     ) {
         if mask.is_some() {
             unimplemented!("mask layers are currently not supported");
+        }
+        if let Some(filter) = &filter {
+            assert_filter_supported(filter);
         }
 
         let blend_mode = blend_mode.unwrap_or_default();
@@ -765,6 +770,7 @@ impl Scene {
     }
 
     /// Push a new filter layer.
+    #[track_caller]
     pub fn push_filter_layer(&mut self, filter: Filter) {
         self.push_layer(None, None, None, None, Some(filter));
     }
@@ -867,7 +873,9 @@ impl Scene {
     }
 
     /// Apply filter to the current paint (affects next drawn element).
+    #[track_caller]
     pub fn set_filter_effect(&mut self, filter: Filter) {
+        assert_filter_supported(&filter);
         self.filter = Some(filter);
     }
 
@@ -1007,6 +1015,19 @@ fn assert_paint_supported(paint: &PaintType, tint: Option<Tint>) {
             "extended image sampling requires the `full_image_support` feature"
         ),
     }
+}
+
+#[track_caller]
+fn assert_filter_supported(filter: &Filter) {
+    assert!(
+        cfg!(feature = "filter_color_matrix")
+            || !filter
+                .graph
+                .primitives
+                .iter()
+                .any(|primitive| matches!(primitive, FilterPrimitive::ColorMatrix { .. })),
+        "color matrix filters require the `filter_color_matrix` feature"
+    );
 }
 
 #[cfg(test)]

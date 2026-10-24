@@ -87,6 +87,7 @@ fn load_shader_infos(shader_dir: &Path) -> Vec<ShaderInfo> {
         "blurred_rounded_rect",
         cfg!(feature = "blurred_rounded_rect"),
     );
+    compiler.set_feature("filter_color_matrix", cfg!(feature = "filter_color_matrix"));
     compiler.set_feature("full_image_support", cfg!(feature = "full_image_support"));
     compiler.set_feature("gradient_sweep", cfg!(feature = "gradient_sweep"));
     compiler.set_feature("texture_external", false);

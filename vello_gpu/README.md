@@ -50,6 +50,7 @@ preprocessing and GPU rendering:
   features.
 - `blurred_rounded_rect` (enabled by default): Enables rendering of blurred
   rounded rectangles.
+- `filter_color_matrix` (enabled by default): Enables color matrix filters.
 - `full_image_support` (enabled by default): If this feature is disabled, only
   external textures using `TextureRegion::Full` with nearest or bilinear
   sampling and opacity are supported. Enabling this feature also adds support

@@ -12,6 +12,10 @@ Subheadings to categorize changes are `added, changed, deprecated, removed, fixe
 
 This release has an [MSRV][] of 1.89.
 
+### Added
+
+- Support for `FilterPrimitive::ColorMatrix`. ([#1765][] by [@AdrianEddy][], [@waywardmonkeys][])
+
 ### Fixed
 
 - `Color` and `Luminosity` blending rendering some gray colors as black, caused by a division by zero in `clip_color`. ([#2000][] by [@zlstringham][])
@@ -251,6 +255,7 @@ This is the initial release. No changelog was kept for this release.
 See also the [vello_common 0.0.1](../vello_common/CHANGELOG.md#001---2025-05-10) release.
 
 [@DJMcNab]: https://github.com/DJMcNab
+[@AdrianEddy]: https://github.com/AdrianEddy
 [@b0nes164]: https://github.com/b0nes164
 [@grebmeg]: https://github.com/grebmeg
 [@jrmoulton]: https://github.com/jrmoulton
@@ -317,6 +322,7 @@ See also the [vello_common 0.0.1](../vello_common/CHANGELOG.md#001---2025-05-10)
 [#1756]: https://github.com/linebender/vello/pull/1756
 [#1760]: https://github.com/linebender/vello/pull/1760
 [#1763]: https://github.com/linebender/vello/pull/1763
+[#1765]: https://github.com/linebender/vello/pull/1765
 [#1787]: https://github.com/linebender/vello/pull/1787
 [#1803]: https://github.com/linebender/vello/pull/1803
 [#1845]: https://github.com/linebender/vello/pull/1845

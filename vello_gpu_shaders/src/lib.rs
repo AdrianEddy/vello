@@ -22,19 +22,22 @@ mod feature_tests {
 
     #[test]
     fn shader_feature_combinations_compile() {
-        const FEATURES: [&str; 4] = [
+        const FEATURES: [&str; 5] = [
             "blurred_rounded_rect",
+            "filter_color_matrix",
             "full_image_support",
             "gradient_sweep",
             "texture_external",
         ];
-        let combinations: [&[&str]; 7] = [
+        let combinations: [&[&str]; 8] = [
             &[],
             &["blurred_rounded_rect"],
+            &["filter_color_matrix"],
             &["full_image_support"],
             &["gradient_sweep"],
             &[
                 "blurred_rounded_rect",
+                "filter_color_matrix",
                 "full_image_support",
                 "gradient_sweep",
             ],
@@ -47,25 +50,49 @@ mod feature_tests {
             for feature in FEATURES {
                 compiler.set_feature(feature, enabled.contains(&feature));
             }
+            for &(name, _) in crate::wgsl::ALL {
+                let source = compiler
+                    .compile(&format!("package::{name}").parse().unwrap())
+                    .unwrap_or_else(|error| panic!("`{name}.wesl` should link: {error}"))
+                    .to_string();
+                let module = wgsl::parse_str(&source).expect("linked WGSL parses");
+                Validator::new(ValidationFlags::all(), Capabilities::all())
+                    .validate(&module)
+                    .expect("linked WGSL validates");
+                // GLSL is only generated without `texture_external`, which naga can't translate.
+                #[cfg(feature = "glsl")]
+                if !enabled.contains(&"texture_external") {
+                    crate::compile::compile_wgsl_shader(
+                        &source,
+                        name,
+                        "vs_main",
+                        "fs_main",
+                        &std::collections::BTreeMap::new(),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn color_matrix_is_only_linked_with_its_feature() {
+        for enabled in [false, true] {
+            let mut compiler = Wesl::new("shaders");
+            compiler.use_stripping(true);
+            compiler.set_feature("filter_color_matrix", enabled);
             let source = compiler
-                .compile(&"package::render".parse().unwrap())
-                .expect("render shader links")
+                .compile(&"package::filter".parse().unwrap())
+                .expect("filter shader links")
                 .to_string();
             let module = wgsl::parse_str(&source).expect("linked WGSL parses");
-            Validator::new(ValidationFlags::all(), Capabilities::all())
-                .validate(&module)
-                .expect("linked WGSL validates");
-            // GLSL is only generated without `texture_external`, which naga can't translate.
-            #[cfg(feature = "glsl")]
-            if !enabled.contains(&"texture_external") {
-                crate::compile::compile_wgsl_shader(
-                    &source,
-                    "render",
-                    "vs_main",
-                    "fs_main",
-                    &std::collections::BTreeMap::new(),
-                );
-            }
+            let linked = module.functions.iter().any(|(_, function)| {
+                function
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| name.contains("color_matrix"))
+            });
+
+            assert_eq!(linked, enabled, "filter_color_matrix = {enabled}");
         }
     }
 }

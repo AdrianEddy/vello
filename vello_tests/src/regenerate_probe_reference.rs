@@ -36,6 +36,7 @@ fn reference_path(element: probe::ProbeFeature, extension: &str) -> PathBuf {
         probe::ProbeFeature::RadialGradient => "probe_radial_gradient",
         probe::ProbeFeature::SweepGradient => "probe_sweep_gradient",
         probe::ProbeFeature::ImageBicubic => "probe_image_bicubic",
+        probe::ProbeFeature::ColorMatrix => "probe_color_matrix",
     };
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../vello_common/assets")
