@@ -23,7 +23,7 @@ use crate::kurbo::Vec2;
 use crate::kurbo::{self, Affine, BezPath, Diagonal2, Join, Line, ParamCurve as _, PathSeg, Shape};
 use crate::peniko::FontData;
 use crate::renderer::{fill_glyph, render_cached_glyph, stroke_glyph};
-use crate::util::AffineExt;
+use crate::util::{AffineExt, biased_floor, biased_fract};
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -502,7 +502,8 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
             // Therefore, we can calculate the relative paint transform for
             // the glyph by pre-concatenating it with the inverted outline transform.
             let outline_cache_key = outline_cache_enabled.then(|| {
-                let fractional_x = outline_transform.translation().x.fract() as f32;
+                // Must split `x` the same way `render_outline_glyph_from_atlas` places the quad.
+                let fractional_x = biased_fract(outline_transform.translation().x) as f32;
                 GlyphCacheKey::new(
                     font_info.id,
                     font_info.index,
@@ -1285,7 +1286,8 @@ fn calculate_outline_transform(
         .as_coeffs();
 
     if hinting_instance.is_some() {
-        final_transform[5] = final_transform[5].round();
+        // Unlike `round`, this also rounds negative halves up.
+        final_transform[5] = biased_floor(final_transform[5] + 0.5);
     }
 
     Affine::new(final_transform)
@@ -2318,13 +2320,17 @@ mod tests {
         Bitmap,
     }
 
+    /// Records the transform of every filled rect, which is how atlas glyphs are drawn.
     #[derive(Default)]
-    struct NoopRenderer;
+    struct TestRenderer {
+        transform: Affine,
+        rect_transforms: Vec<Affine>,
+    }
 
     static BLACK_PAINT: PaintType = PaintType::Solid(BLACK);
 
     struct TestResources {
-        renderer: NoopRenderer,
+        renderer: TestRenderer,
         prep_cache: GlyphPrepCache,
         glyph_atlas: GlyphAtlas,
         image_cache: ImageCache,
@@ -2333,7 +2339,7 @@ mod tests {
     impl Default for TestResources {
         fn default() -> Self {
             Self {
-                renderer: NoopRenderer,
+                renderer: TestRenderer::default(),
                 prep_cache: GlyphPrepCache::default(),
                 glyph_atlas: GlyphAtlas::default(),
                 image_cache: ImageCache::new_with_config(AtlasConfig {
@@ -2344,8 +2350,10 @@ mod tests {
         }
     }
 
-    impl DrawSink for NoopRenderer {
-        fn set_transform(&mut self, _t: Affine) {}
+    impl DrawSink for TestRenderer {
+        fn set_transform(&mut self, t: Affine) {
+            self.transform = t;
+        }
 
         fn set_paint(&mut self, _paint: AtlasPaint) {}
 
@@ -2353,7 +2361,9 @@ mod tests {
 
         fn fill_path(&mut self, _path: &BezPath) {}
 
-        fn fill_rect(&mut self, _rect: &Rect) {}
+        fn fill_rect(&mut self, _rect: &Rect) {
+            self.rect_transforms.push(self.transform);
+        }
 
         fn push_clip_layer(&mut self, _clip: &BezPath) {}
 
@@ -2370,7 +2380,7 @@ mod tests {
         }
     }
 
-    impl GlyphRenderer for NoopRenderer {
+    impl GlyphRenderer for TestRenderer {
         type SavedState = ();
 
         fn save_state(&mut self) -> Self::SavedState {}
@@ -2425,6 +2435,19 @@ mod tests {
         }
     }
 
+    fn test_run(font: &FontData, transform: Affine, hint: bool) -> GlyphRun<'static> {
+        GlyphRun {
+            font: font.clone(),
+            font_size: 20.0,
+            font_embolden: FontEmbolden::default(),
+            transform,
+            scene_paint_transform: transform,
+            glyph_transform: None,
+            normalized_coords: &[],
+            hint,
+        }
+    }
+
     fn draw_test_glyph(
         font: &FontData,
         glyph: Glyph,
@@ -2438,18 +2461,7 @@ mod tests {
             AtlasCacher::Disabled
         };
 
-        let transform = Affine::translate((0.0, 20.0));
-        let mut run = GlyphRun {
-            font: font.clone(),
-            font_size: 20.0,
-            font_embolden: FontEmbolden::default(),
-            transform,
-            scene_paint_transform: transform,
-            glyph_transform: None,
-            normalized_coords: &[],
-            hint: false,
-        }
-        .build(
+        let mut run = test_run(font, Affine::translate((0.0, 20.0)), false).build(
             core::iter::once(glyph),
             resources.prep_cache.as_mut(),
             atlas_cacher,
@@ -2557,6 +2569,87 @@ mod tests {
     #[test]
     fn bitmap_glyph_is_not_cached_when_atlas_cache_is_disabled() {
         ensure_no_cache(TestGlyphKind::Bitmap, Style::Fill, false);
+    }
+
+    fn draw_cached_outline_glyphs(origins: &[(f64, f64)], hint: bool) -> TestResources {
+        let font = test_font(TestGlyphKind::Outline);
+        let glyph = test_glyph(&font, TestGlyphKind::Outline);
+        let mut resources = TestResources::default();
+        for &origin in origins {
+            let mut run = test_run(&font, Affine::translate(origin), hint).build(
+                core::iter::once(glyph),
+                resources.prep_cache.as_mut(),
+                AtlasCacher::Enabled(&mut resources.glyph_atlas, &mut resources.image_cache),
+            );
+            assert_eq!(run.fill_glyphs(&mut resources.renderer), Ok(()));
+        }
+        resources
+    }
+
+    // Far above the rounding noise of real origins, so that it survives narrowing the subpixel
+    // offset to `f32`, but below the bias in `util.rs`.
+    const NOISE: f64 = 1e-7;
+
+    #[test]
+    fn cached_outline_placement_is_stable_under_rounding_noise() {
+        // The last origin of each case pins the intended pixel.
+        for (x, y, hint, pixel_y) in [
+            (100.0, 20.0, false, 20.0),
+            (-100.0, 20.0, false, 20.0),
+            (100.0, 20.5, true, 21.0),
+            (100.0, -20.5, true, -20.0),
+        ] {
+            let origins = [
+                (x - NOISE, y - NOISE),
+                (x, y),
+                (x + NOISE, y + NOISE),
+                (x, pixel_y),
+            ];
+            let resources = draw_cached_outline_glyphs(&origins, hint);
+
+            assert_eq!(
+                resources.glyph_atlas.len(),
+                1,
+                "atlas entries at ({x}, {y})"
+            );
+            let quads = &resources.renderer.rect_transforms;
+            assert_eq!(quads.len(), 4);
+            assert!(
+                quads.iter().all(|quad| *quad == quads[3]),
+                "quads at ({x}, {y}): {quads:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn cached_outline_subpixel_bucket_is_stable_under_rounding_noise() {
+        const BEYOND_BIAS: f64 = 1e-5;
+        for boundary in [100.125, 100.375, 100.625] {
+            let resources = draw_cached_outline_glyphs(
+                &[
+                    (boundary - NOISE, 20.0),
+                    (boundary, 20.0),
+                    (boundary + NOISE, 20.0),
+                    (boundary + BEYOND_BIAS, 20.0),
+                ],
+                false,
+            );
+            assert_eq!(
+                resources.glyph_atlas.len(),
+                1,
+                "atlas entries at {boundary}"
+            );
+
+            let resources = draw_cached_outline_glyphs(
+                &[(boundary, 20.0), (boundary - BEYOND_BIAS, 20.0)],
+                false,
+            );
+            assert_eq!(
+                resources.glyph_atlas.len(),
+                2,
+                "atlas entries around {boundary}"
+            );
+        }
     }
 
     #[test]
