@@ -430,13 +430,16 @@ impl AppState {
 
         // 1st example — uploading a pixmap directly to the texture atlas.
         let pixmap1 = ImageScene::read_flower_image();
-        self.renderer_wrapper.renderer.upload_image(
-            &mut self.renderer_wrapper.resources,
-            &self.renderer_wrapper.device,
-            &self.renderer_wrapper.queue,
-            &mut encoder,
-            &pixmap1,
-        );
+        self.renderer_wrapper
+            .renderer
+            .upload_image(
+                &mut self.renderer_wrapper.resources,
+                &self.renderer_wrapper.device,
+                &self.renderer_wrapper.queue,
+                &mut encoder,
+                &pixmap1,
+            )
+            .expect("failed to upload pixmap to the atlas");
 
         // 2nd example — uploading from a wgpu texture.
         let pixmap2 = ImageScene::read_cowboy_image();
@@ -445,13 +448,16 @@ impl AppState {
             &self.renderer_wrapper.queue,
             &pixmap2,
         );
-        self.renderer_wrapper.renderer.upload_image(
-            &mut self.renderer_wrapper.resources,
-            &self.renderer_wrapper.device,
-            &self.renderer_wrapper.queue,
-            &mut encoder,
-            &texture2,
-        );
+        self.renderer_wrapper
+            .renderer
+            .upload_image(
+                &mut self.renderer_wrapper.resources,
+                &self.renderer_wrapper.device,
+                &self.renderer_wrapper.queue,
+                &mut encoder,
+                &texture2,
+            )
+            .expect("failed to upload texture to the atlas");
 
         self.renderer_wrapper.queue.submit([encoder.finish()]);
     }

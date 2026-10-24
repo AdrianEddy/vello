@@ -52,7 +52,7 @@ use core::{fmt::Debug, num::NonZeroU64, ops::Range};
 use hashbrown::{HashMap, hash_map::Entry};
 use vello_common::color::{AlphaColor, Srgb};
 use vello_common::image_cache::{ImageCache, ImageResource};
-use vello_common::multi_atlas::{AtlasConfig, AtlasId};
+use vello_common::multi_atlas::{AtlasConfig, AtlasError, AtlasId};
 use vello_common::{
     TextureId,
     encode::{
@@ -609,6 +609,10 @@ impl Renderer {
     /// 1. Reserves space in the image cache
     /// 2. Writes the image data directly to the atlas
     /// 3. Returns the `ImageId` for use in rendering
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the image is empty or the image atlas has no room for it.
     #[track_caller]
     pub fn upload_image<T: AtlasWriter>(
         &mut self,
@@ -617,7 +621,7 @@ impl Renderer {
         queue: &Queue,
         encoder: &mut CommandEncoder,
         writer: &T,
-    ) -> vello_common::paint::ImageId {
+    ) -> Result<vello_common::paint::ImageId, AtlasError> {
         self.upload_image_with(
             &mut resources.image_cache,
             device,
@@ -637,16 +641,16 @@ impl Renderer {
         encoder: &mut CommandEncoder,
         writer: &T,
         padding: u16,
-    ) -> vello_common::paint::ImageId {
+    ) -> Result<vello_common::paint::ImageId, AtlasError> {
         if !cfg!(feature = "full_image_support") {
             panic!("uploaded images require the `full_image_support` feature");
         }
 
         let width = writer.width();
         let height = writer.height();
-        let image_id = image_cache.allocate(width, height, padding).unwrap();
+        let image_id = image_cache.allocate(width, height, padding)?;
         self.write_to_atlas(image_cache, device, queue, encoder, image_id, writer, None);
-        image_id
+        Ok(image_id)
     }
 
     /// Write pixel data to an existing atlas allocation.
@@ -765,7 +769,8 @@ impl Renderer {
             let gpu_paint = match paint {
                 EncodedPaint::Image(img) => match &img.source {
                     ImageSource::OpaqueId { id, .. } => {
-                        let image_resource = image_cache.get(*id).unwrap();
+                        let image_resource =
+                            image_cache.get(*id).ok_or(RenderError::MissingImage(*id))?;
                         self.encode_image_paint(img, image_resource)
                     }
                     ImageSource::ExternalTexture {

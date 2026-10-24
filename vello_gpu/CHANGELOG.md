@@ -19,11 +19,13 @@ This release has an [MSRV][] of 1.89.
 ### Changed
 
 - Breaking change: `destroy_image` moved from `Renderer` and `WebGlRenderer` to `Resources`; the next `render` frees the image's atlas region. ([#1739][] by [@AdrianEddy][])
+- Breaking change: `Renderer::upload_image` returns a `Result`, failing instead of panicking when the image is empty or doesn't fit in the atlas, as `WebGlRenderer::upload_image` does. (by [@AdrianEddy][])
 
 ### Fixed
 
 - A potential division by zero in `clip_color` for gray colors in the `Color` and `Luminosity` blend modes. ([#2000][] by [@zlstringham][])
 - Images uploaded and glyphs cached into the atlas region of a destroyed image are no longer erased by that region's clear. ([#1739][] by [@AdrianEddy][])
+- The wgpu renderer returns `RenderError::MissingImage` for an image that isn't in the atlas instead of panicking. (by [@AdrianEddy][])
 
 ## [0.3.0][] - 2026-10-02
 

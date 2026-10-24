@@ -118,6 +118,41 @@ fn image_atlas_upload_larger_than_atlas_fails() {
     );
 }
 
+/// An empty upload fails without adding atlases.
+#[wasm_bindgen_test]
+fn image_atlas_empty_upload_fails_without_adding_atlases() {
+    let canvas = create_canvas();
+    let settings = RenderSettings::default().with_memory_settings(MemorySettings {
+        image_atlas_config: AtlasConfig {
+            atlas_size: (10, 10),
+            ..AtlasConfig::default()
+        },
+        ..MemorySettings::default()
+    });
+    let (mut renderer, mut resources) = WebGlRenderer::new_with(&canvas, settings, true).unwrap();
+
+    for _ in 0..3 {
+        assert!(
+            matches!(
+                renderer.upload_image(&mut resources, &Pixmap::new(0, 2)),
+                Err(WebGlError::Render(RenderError::AtlasError(
+                    vello_gpu::AtlasError::EmptyTexture { .. }
+                )))
+            ),
+            "an empty upload must fail"
+        );
+    }
+    renderer
+        .upload_image(&mut resources, &Pixmap::new(2, 2))
+        .unwrap();
+
+    assert_eq!(
+        renderer.atlas_info().texture_count,
+        1,
+        "empty uploads must not add atlases"
+    );
+}
+
 #[wasm_bindgen_test]
 fn image_atlas_rejects_sampling_from_its_render_target() {
     let canvas = create_canvas();

@@ -499,13 +499,16 @@ impl GpuRenderer {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
-        let image_id = self.renderer.upload_image(
-            &mut self.resources,
-            &self.device,
-            &self.queue,
-            &mut encoder,
-            pixmap,
-        );
+        let image_id = self
+            .renderer
+            .upload_image(
+                &mut self.resources,
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                pixmap,
+            )
+            .unwrap();
         self.queue.submit([encoder.finish()]);
         image_id
     }

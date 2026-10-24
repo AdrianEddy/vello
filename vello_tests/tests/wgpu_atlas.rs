@@ -86,13 +86,16 @@ impl Ctx {
 
     fn upload(&mut self, size: u16, color: AlphaColor<Srgb>) -> ImageId {
         let mut encoder = self.encoder();
-        let id = self.renderer.upload_image(
-            &mut self.resources,
-            &self.device,
-            &self.queue,
-            &mut encoder,
-            &solid_pixmap(size, color),
-        );
+        let id = self
+            .renderer
+            .upload_image(
+                &mut self.resources,
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &solid_pixmap(size, color),
+            )
+            .unwrap();
         self.queue.submit([encoder.finish()]);
         id
     }
@@ -129,13 +132,15 @@ impl Ctx {
             },
             texture.size(),
         );
-        self.renderer.upload_image(
-            &mut self.resources,
-            &self.device,
-            &self.queue,
-            encoder,
-            &texture,
-        )
+        self.renderer
+            .upload_image(
+                &mut self.resources,
+                &self.device,
+                &self.queue,
+                encoder,
+                &texture,
+            )
+            .unwrap()
     }
 
     fn try_encode_render(
