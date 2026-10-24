@@ -232,14 +232,12 @@ impl<'a, T: DrawTarget> DrawBuilder<'a, T> {
         // For normal paths, the `visit_strip_fill_segments` method takes care of doing this.
         // For rectangles, we need to do this ourselves and can do a simple intersection.
         let clipped_rect = rect.intersect(self.state.target_bbox.as_rect());
-        if clipped_rect.is_zero_area() {
+        let Some(split) = split_rect(&clipped_rect) else {
             return;
-        }
+        };
 
         let paint = paint_resolver.pack(paint);
         let (depth_index, opaque_pass) = self.state.depth_counter.next(paint.opaque);
-
-        let split = split_rect(&clipped_rect);
 
         for part in [
             Some(split.main),
@@ -261,7 +259,7 @@ impl<'a, T: DrawTarget> DrawBuilder<'a, T> {
                 depth_index,
             );
 
-            if !(opaque_pass && part.frac == 0 && self.push_opaque(strip, paint.texture_source)) {
+            if !(opaque_pass && part.is_full() && self.push_opaque(strip, paint.texture_source)) {
                 self.draw.push(self.strips, strip, paint.texture_source);
             }
         }
@@ -311,10 +309,7 @@ impl<'a, T: DrawTarget> DrawBuilder<'a, T> {
 
             let (depth_index, _) = self.state.depth_counter.next(false);
 
-            let rect_part = RectPart {
-                rect: sample_bbox.shift(self.state.target.geometry_shift()),
-                frac: 0,
-            };
+            let rect_part = RectPart::full(sample_bbox.shift(self.state.target.geometry_shift()));
 
             self.draw.has_child_layer = true;
             self.draw.push(
@@ -393,6 +388,11 @@ impl<T: DrawTarget> DrawState<T> {
 /// represents a full rectangle.
 const RECT_STRIP_FLAG: u32 = 1 << 31;
 
+/// Number of low bits of [`GpuStrip::depth_index`] that hold the depth index.
+///
+/// Rect strips store the corner corrections of their part in the bits above.
+const DEPTH_INDEX_BITS: u32 = 24;
+
 impl GpuStrip {
     fn from_fill_segment(
         rect: RectU16,
@@ -421,15 +421,19 @@ impl GpuStrip {
     }
 
     fn from_rect(part: RectPart, payload: u32, paint: u32, depth_index: u32) -> Self {
+        debug_assert!(
+            depth_index <= DepthCounter::MAX,
+            "depth index {depth_index} overlaps the corner corrections"
+        );
         Self {
             x: part.rect.x0,
             y: part.rect.y0,
             width: part.rect.width(),
             dense_width_or_rect_height: part.rect.height(),
-            col_idx_or_rect_frac: part.frac,
+            col_idx_or_rect_frac: u32::from_le_bytes(part.alphas),
             payload,
             paint_and_rect_flag: paint | RECT_STRIP_FLAG,
-            depth_index,
+            depth_index: depth_index | (part.packed_corner_corrections() << DEPTH_INDEX_BITS),
         }
     }
 }
@@ -533,7 +537,7 @@ pub(crate) struct DepthCounter {
 
 impl DepthCounter {
     /// The largest depth index, which the shader maps to the smallest depth above zero.
-    const MAX: u32 = (1 << 24) - 1;
+    const MAX: u32 = (1 << DEPTH_INDEX_BITS) - 1;
 
     /// Return the depth index of the next draw and whether it may use the opaque pass.
     ///
@@ -585,7 +589,8 @@ impl StripAlphaFillSegmentExt for StripAlphaFillSegment {
 #[cfg(test)]
 mod tests {
     use super::{
-        DepthCounter, Draw, DrawBuffers, DrawBuilder, DrawState, ExternalTextureRun, OpaqueDraw,
+        DEPTH_INDEX_BITS, DepthCounter, Draw, DrawBuffers, DrawBuilder, DrawState,
+        ExternalTextureRun, OpaqueDraw,
     };
     use crate::GpuStrip;
     use crate::paint::{
@@ -1181,6 +1186,31 @@ mod tests {
                 .map(position_and_depth)
                 .collect::<Vec<_>>(),
             [(8, MAX), (16, MAX), (20, MAX), (32, MAX), (40, MAX)]
+        );
+    }
+
+    #[test]
+    fn rect_corner_corrections_are_stored_above_depth_index() {
+        let mut case = DrawCase::new(RootTarget::UserSurface, RectU16::new(0, 0, 64, 8));
+        let mut draw = Draw::default();
+
+        // The edge alphas of this rect are 255, but its top-left alpha is 254.
+        case.rect(
+            &mut draw,
+            Rect::new(0.001, 0.001, 4.0, 4.0),
+            solid(1.0),
+            no_paints(),
+        );
+
+        assert!(case.buffers.opaque.is_empty());
+        assert_eq!(
+            case.buffers
+                .strips
+                .ranged(&draw.strip_ranges)
+                .iter()
+                .map(|strip| (strip.col_idx_or_rect_frac, strip.depth_index))
+                .collect::<Vec<_>>(),
+            [(u32::MAX, 1 | (0b11 << DEPTH_INDEX_BITS))]
         );
     }
 }

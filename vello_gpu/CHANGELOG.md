@@ -20,6 +20,7 @@ This release has an [MSRV][] of 1.89.
 
 - A potential division by zero in `clip_color` for gray colors in the `Color` and `Luminosity` blend modes. ([#2000][] by [@zlstringham][])
 - Draws disappearing once a target received more than 2^24 + 1 opaque draws; opaque draws after the first 2^24 - 1 now use the alpha pass. (by [@AdrianEddy][])
+- Rectangles drawn as quads now have exactly the coverage of the strip renderer and `vello_cpu`, so a clip path no longer changes the coverage of rectangles it does not cut. ([#1784][] by [@AdrianEddy][])
 
 ## [0.3.0][] - 2026-10-02
 
@@ -362,6 +363,7 @@ See also the [vello_cpu 0.0.4](../vello_cpu/CHANGELOG.md#004---2025-10-17) and [
 [#1778]: https://github.com/linebender/vello/pull/1778
 [#1779]: https://github.com/linebender/vello/pull/1779
 [#1781]: https://github.com/linebender/vello/pull/1781
+[#1784]: https://github.com/linebender/vello/pull/1784
 [#1791]: https://github.com/linebender/vello/pull/1791
 [#1792]: https://github.com/linebender/vello/pull/1792
 [#1794]: https://github.com/linebender/vello/pull/1794
