@@ -12,6 +12,10 @@ Subheadings to categorize changes are `added, changed, deprecated, removed, fixe
 
 This release has an [MSRV][] of 1.89.
 
+### Fixed
+
+- Glyph placement flipping by a pixel at integer and half-pixel origins under float rounding noise; hinted baselines at negative halves now round up like positive ones. ([#1785][] by [@AdrianEddy][])
+
 ## [0.4.0][] - 2026-10-02
 
 This release has an [MSRV][] of 1.89.
@@ -67,6 +71,7 @@ The first release of Glifo!
 
 Glifo moved to the Vello repo in [#1539][] and was prepared for release by [@conor-93][], [@grebmeg][], [@jrmoulton][], [@LaurenzV][], [@nicoburns][], [@oscargus][], [@taj-p][], and [@xStrom][].
 
+[@AdrianEddy]: https://github.com/AdrianEddy
 [@conor-93]: https://github.com/conor-93
 [@grebmeg]: https://github.com/grebmeg
 [@jrmoulton]: https://github.com/jrmoulton
@@ -81,6 +86,7 @@ Glifo moved to the Vello repo in [#1539][] and was prepared for release by [@con
 [#1668]: https://github.com/linebender/vello/pull/1668
 [#1672]: https://github.com/linebender/vello/pull/1672
 [#1774]: https://github.com/linebender/vello/pull/1774
+[#1785]: https://github.com/linebender/vello/pull/1785
 [#1890]: https://github.com/linebender/vello/pull/1890
 [#1936]: https://github.com/linebender/vello/pull/1936
 [#1939]: https://github.com/linebender/vello/pull/1939

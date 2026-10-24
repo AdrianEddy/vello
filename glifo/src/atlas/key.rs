@@ -185,15 +185,19 @@ pub(crate) fn pack_color(color: AlphaColor<Srgb>) -> u32 {
 /// Quantize a fractional pixel offset into one of [`SUBPIXEL_BUCKETS`] buckets.
 ///
 /// Values near 1.0 (>= 0.875 with 4 buckets) are clamped to the last bucket
-/// rather than wrapping to 0. Wrapping to bucket 0 without also incrementing the
-/// integer pixel coordinate would shift the glyph by ~0.75px in the wrong
-/// direction. Clamping keeps the worst-case error to 0.125px.
+/// rather than wrapping to 0, including exactly 1.0, which narrowing a fraction
+/// just below 1 to `f32` produces. Wrapping to bucket 0 without also incrementing
+/// the integer pixel coordinate would shift the glyph by ~0.75px in the wrong
+/// direction. Clamping keeps the worst-case error to 0.25px.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "result is clamped to SUBPIXEL_BUCKETS-1 which fits in u8"
 )]
 #[inline]
 fn quantize_subpixel(frac: f32) -> u8 {
+    if frac == 1.0 {
+        return SUBPIXEL_BUCKETS - 1;
+    }
     let normalized = frac.fract();
     let normalized = if normalized < 0.0 {
         normalized + 1.0
@@ -228,7 +232,31 @@ mod tests {
         assert_eq!(quantize_subpixel(0.7), 3);
         assert_eq!(quantize_subpixel(0.75), 3);
         assert_eq!(quantize_subpixel(0.9), 3);
-        assert_eq!(quantize_subpixel(1.0), 0);
+        assert_eq!(quantize_subpixel(1.0), 3);
+    }
+
+    #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the narrowing is what is being tested"
+    )]
+    fn test_quantize_subpixel_narrowed_to_one() {
+        let frac = (1.0_f64 - 1e-9) as f32;
+        assert_eq!(frac, 1.0);
+        assert_eq!(quantize_subpixel(frac), SUBPIXEL_BUCKETS - 1);
+    }
+
+    #[test]
+    fn test_quantize_subpixel_outside_unit_interval() {
+        // A negative offset counts from the pixel below.
+        assert_eq!(quantize_subpixel(-0.3), 3);
+        assert_eq!(quantize_subpixel(-0.75), 1);
+        assert_eq!(quantize_subpixel(-0.0), 0);
+        assert_eq!(quantize_subpixel(-1.0), 0);
+        assert_eq!(quantize_subpixel(-2.0), 0);
+        // Only exactly 1.0 is clamped, larger offsets wrap.
+        assert_eq!(quantize_subpixel(1.25), 1);
+        assert_eq!(quantize_subpixel(2.0), 0);
     }
 
     #[test]
