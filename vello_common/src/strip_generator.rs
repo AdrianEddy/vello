@@ -304,8 +304,10 @@ fn render_with_clip(
 mod tests {
     use alloc::format;
 
+    use crate::clip::{ClipContext, PathDataRef};
     use crate::fearless_simd::Level;
-    use crate::kurbo::{Affine, Rect, Shape};
+    use crate::geometry::RectU16;
+    use crate::kurbo::{Affine, BezPath, Circle, Rect, Shape, Stroke};
     use crate::peniko::Fill;
     use crate::strip_generator::{StripGenerator, StripStorage};
 
@@ -456,5 +458,89 @@ mod tests {
     #[test]
     fn rect_inverted_both_axes() {
         assert_rect_fast_eq_path(Rect::new(18.0, 18.0, 2.0, 2.0), "inverted_both_axes");
+    }
+
+    /// Culling geometry against the bounding box of a clip must not change the clipped strips.
+    #[test]
+    fn clip_culling_preserves_clipped_strips() {
+        let mut generator = StripGenerator::new(100, 100, Level::baseline());
+
+        let mut clips = [ClipContext::new(), ClipContext::new(), ClipContext::new()];
+        clips[0].push_clip_rect(&Rect::new(20.0, 22.0, 60.0, 61.0), &mut generator);
+        clips[1].push_clip_rect(&Rect::new(17.3, 9.6, 71.8, 47.2), &mut generator);
+        clips[2].push_clip_path(
+            Circle::new((50.0, 50.0), 25.0).path_elements(0.1),
+            &mut generator,
+            Fill::NonZero,
+            Affine::IDENTITY,
+            None,
+        );
+
+        // Lines on every side of the clips, inside the viewport, so that lines are culled for the
+        // clips but not for the viewport. The inner rect is fully right of the first clip, so its
+        // closing line is culled as well.
+        let mut frame = Rect::new(4.0, 4.0, 96.0, 96.0).to_path(0.1);
+        frame.extend(&Rect::new(70.0, 30.0, 90.0, 50.0).to_path(0.1));
+
+        // Self-intersecting, partly outside the viewport, with an implicitly closed subpath.
+        let mut crossed = BezPath::new();
+        crossed.move_to((50.0, -5.0));
+        crossed.line_to((80.0, 110.0));
+        crossed.line_to((-10.0, 30.0));
+        crossed.line_to((110.0, 35.0));
+        crossed.line_to((15.0, 95.0));
+        crossed.close_path();
+        crossed.move_to((65.0, 5.0));
+        crossed.line_to((95.0, 25.0));
+        crossed.line_to((90.0, 70.0));
+
+        let stroke = Stroke::new(3.0);
+        let cases = [
+            (&frame, Some(Fill::NonZero)),
+            (&frame, Some(Fill::EvenOdd)),
+            (&crossed, Some(Fill::NonZero)),
+            (&crossed, Some(Fill::EvenOdd)),
+            (&crossed, None),
+        ];
+
+        for (clip_idx, clip) in clips.iter().enumerate() {
+            let clip = clip.get().unwrap().path;
+            // The same clip, but culling only against the viewport.
+            let viewport_culled = PathDataRef {
+                bbox: RectU16::new(0, 0, 100, 100),
+                ..clip
+            };
+            for (case_idx, (path, fill_rule)) in cases.iter().enumerate() {
+                let mut generate = |clip| {
+                    let mut storage = StripStorage::default();
+                    match fill_rule {
+                        Some(fill_rule) => generator.generate_filled_path(
+                            *path,
+                            *fill_rule,
+                            Affine::IDENTITY,
+                            None,
+                            &mut storage,
+                            Some(clip),
+                        ),
+                        None => generator.generate_stroked_path(
+                            *path,
+                            &stroke,
+                            Affine::IDENTITY,
+                            None,
+                            &mut storage,
+                            Some(clip),
+                        ),
+                    }
+                    (storage, generator.line_buf.len())
+                };
+                let (culled, culled_lines) = generate(clip);
+                let (expected, expected_lines) = generate(viewport_culled);
+
+                let case = format!("clip {clip_idx}, case {case_idx}");
+                assert!(culled_lines < expected_lines, "{case}: nothing was culled");
+                assert_eq!(culled.strips, expected.strips, "{case}: strips mismatch");
+                assert_eq!(culled.alphas, expected.alphas, "{case}: alphas mismatch");
+            }
+        }
     }
 }
