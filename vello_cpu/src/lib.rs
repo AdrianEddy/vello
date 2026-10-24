@@ -196,6 +196,8 @@ pub use render::{
 pub use glifo::Glyph;
 #[cfg(feature = "text")]
 pub use text::{CpuGlyphRunBackend, GlyphRunBuilder};
+#[cfg(feature = "text")]
+pub use vello_common::GlyphMaintenance;
 pub use vello_common::reexports::cpu::*;
 
 /// The selected rendering mode.

@@ -22,6 +22,7 @@ use glifo::{
 use peniko::BlendMode;
 use peniko::color::palette::css::BLACK;
 use peniko::color::{AlphaColor, Srgb};
+use vello_common::GlyphMaintenance;
 use vello_common::kurbo::{Affine, BezPath, Rect};
 use vello_common::multi_atlas::AtlasConfig;
 use vello_common::paint::{Image, ImageSource, PaintType};
@@ -131,8 +132,32 @@ impl Resources {
     pub(crate) fn after_render<T, E>(
         &mut self,
         backend: &mut T,
+        clear_rect: impl FnMut(&mut T, &PendingClearRect) -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.rendered_since_glyph_maintenance = true;
+        if self.glyph_maintenance == GlyphMaintenance::PerRender {
+            self.maintain_glyphs(backend, clear_rect)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Set when the glyph caches are aged. The default is [`GlyphMaintenance::PerRender`].
+    pub fn set_glyph_maintenance(&mut self, glyph_maintenance: GlyphMaintenance) {
+        self.glyph_maintenance = glyph_maintenance;
+    }
+
+    pub(crate) fn maintain_glyphs<T, E>(
+        &mut self,
+        backend: &mut T,
         mut clear_rect: impl FnMut(&mut T, &PendingClearRect) -> Result<(), E>,
     ) -> Result<(), E> {
+        // Every render writes all pending glyphs into the atlas, so this ensures that a glyph is
+        // never evicted before it has been written.
+        if !core::mem::take(&mut self.rendered_since_glyph_maintenance) {
+            return Ok(());
+        }
+
         self.glyph_prep_cache.maintain();
         if let Some(glyph_resources) = self.glyph_resources.as_mut() {
             glyph_resources.maintain(&mut self.image_cache);

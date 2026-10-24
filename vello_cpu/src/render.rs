@@ -11,6 +11,8 @@ use crate::dispatch::multi_threaded::MultiThreadedDispatcher;
 use crate::text::{GlyphAtlasResources, GlyphRunBuilder};
 #[cfg(feature = "text")]
 use glifo::GlyphPrepCache;
+#[cfg(feature = "text")]
+use vello_common::GlyphMaintenance;
 
 use crate::dispatch::single_threaded::SingleThreadedDispatcher;
 use crate::kurbo::{PathEl, Point};
@@ -68,6 +70,10 @@ pub struct Resources {
     // Will be initialized lazily on first use.
     #[cfg(feature = "text")]
     pub(crate) glyph_resources: Option<GlyphAtlasResources>,
+    #[cfg(feature = "text")]
+    pub(crate) glyph_maintenance: GlyphMaintenance,
+    #[cfg(feature = "text")]
+    pub(crate) rendered_since_glyph_maintenance: bool,
 }
 
 impl Resources {
@@ -86,7 +92,7 @@ impl Resources {
 
     pub(crate) fn after_render(&mut self) {
         #[cfg(feature = "text")]
-        self.maintain_glyph_cache();
+        self.after_glyph_render();
     }
 }
 
@@ -895,11 +901,6 @@ impl RenderContext {
             &self.encoded_paints,
             &resources.image_registry,
         );
-        // TODO: We need to figure something out here API-wise. At the moment, the user can
-        // theoretically rasterize the same `RenderContext` multiple times without resetting in-between.
-        // However, if glyph caching is enabled, this method call could now evict that were previously
-        // assumed to exist in `RenderContext`, meaning that if the user rasterizes the same `RenderContext`
-        // again without resetting it, some of the cached glyphs might be stale and not exist anymore.
         resources.after_render();
     }
 
@@ -1041,6 +1042,8 @@ mod tests {
     use alloc::vec;
     #[cfg(feature = "text")]
     use glifo::Glyph;
+    #[cfg(feature = "text")]
+    use vello_common::GlyphMaintenance;
     use vello_common::color::PremulRgba8;
     use vello_common::color::palette::css::{BLUE, RED};
     use vello_common::kurbo::{Rect, Shape};
@@ -1486,5 +1489,68 @@ mod tests {
             .unwrap();
 
         assert!(resources.glyph_resources.is_some());
+    }
+
+    #[cfg(feature = "text")]
+    #[test]
+    fn explicit_glyph_maintenance() {
+        const ROBOTO_FONT: &[u8] = include_bytes!("../../assets/roboto/Roboto-Regular.ttf");
+
+        let font = FontData::new(Blob::new(Arc::new(ROBOTO_FONT)), 0);
+        let glyphs = [Glyph {
+            id: 44,
+            x: 10.0,
+            y: 60.0,
+        }];
+
+        let draw_glyphs = |resources: &mut Resources| {
+            let mut ctx = RenderContext::new(100, 100);
+            ctx.glyph_run(resources, &font)
+                .font_size(50.0)
+                .atlas_cache(true)
+                .fill_glyphs(glyphs.into_iter())
+                .unwrap();
+            ctx.flush();
+            ctx
+        };
+        let cached_glyphs = |resources: &Resources| {
+            resources
+                .glyph_resources
+                .as_ref()
+                .unwrap()
+                .glyph_atlas
+                .len()
+        };
+
+        let mut expected = Pixmap::new(100, 100);
+        let mut reference_resources = Resources::new();
+        draw_glyphs(&mut reference_resources).render(&mut expected, &mut reference_resources);
+        assert!(expected.data_as_u8_slice().iter().any(|&byte| byte != 0));
+
+        let mut resources = Resources::new();
+        resources.set_glyph_maintenance(GlyphMaintenance::Explicit);
+        let ctx = draw_glyphs(&mut resources);
+        let mut empty = RenderContext::new(100, 100);
+        empty.flush();
+
+        // The scene is rendered for the first time after many renders of another one.
+        let mut target = Pixmap::new(100, 100);
+        for _ in 0..200 {
+            empty.render(&mut target, &mut resources);
+        }
+        ctx.render(&mut target, &mut resources);
+        assert_eq!(target.data_as_u8_slice(), expected.data_as_u8_slice());
+
+        // Only the first pass follows a render.
+        for _ in 0..200 {
+            resources.maintain_glyphs();
+        }
+        assert_eq!(cached_glyphs(&resources), 1);
+
+        for _ in 0..128 {
+            empty.render(&mut target, &mut resources);
+            resources.maintain_glyphs();
+        }
+        assert_eq!(cached_glyphs(&resources), 0);
     }
 }

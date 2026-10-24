@@ -411,6 +411,25 @@ impl Renderer {
         result
     }
 
+    /// Run one glyph cache maintenance pass, see [`GlyphMaintenance`](crate::GlyphMaintenance).
+    ///
+    /// With [`GlyphMaintenance::Explicit`](crate::GlyphMaintenance::Explicit), call this once per
+    /// frame, after the frame's renders have been submitted: evicted glyphs are cleared from the
+    /// atlas with writes to `queue`, which run before any command buffer submitted later. A pass
+    /// without a render since the previous pass does nothing, so with
+    /// [`GlyphMaintenance::PerRender`](crate::GlyphMaintenance::PerRender), where every render
+    /// runs a pass, this has no effect.
+    #[cfg(feature = "text")]
+    pub fn maintain_glyphs(&mut self, resources: &mut Resources, queue: &Queue) {
+        resources
+            .maintain_glyphs(self, |renderer, rect| {
+                clear_atlas_region(queue, renderer, rect);
+
+                Ok::<(), core::convert::Infallible>(())
+            })
+            .unwrap_or_else(|error| match error {});
+    }
+
     /// Render a `scene` directly into an atlas layer.
     ///
     /// This renders the scene's content into the specified atlas layer, which can then

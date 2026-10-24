@@ -3,15 +3,17 @@
 
 //! Tests for the image/glyph atlas configuration of the WebGL renderer.
 
+use crate::util::layout_glyphs_roboto;
 use vello_common::{
-    kurbo::Rect,
+    color::AlphaColor,
+    kurbo::{Affine, Rect},
     paint::{Image, ImageSource, TextureRegion},
     peniko::ImageSampler,
     pixmap::Pixmap,
 };
 use vello_gpu::{
-    AtlasConfig, AtlasId, AtlasTextureInfo, MemorySettings, RenderError, RenderSettings, Scene,
-    TextureId, WebGlError, WebGlRenderer, WebGlTextureBindings,
+    AtlasConfig, AtlasId, AtlasTextureInfo, GlyphMaintenance, MemorySettings, RenderError,
+    RenderSettings, RenderSize, Scene, TextureId, WebGlError, WebGlRenderer, WebGlTextureBindings,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
@@ -148,5 +150,72 @@ fn image_atlas_rejects_sampling_from_its_render_target() {
             Err(WebGlError::Render(RenderError::TextureFeedbackLoop(id))) if id == texture_id
         ),
         "sampling from the render target should fail"
+    );
+}
+
+#[wasm_bindgen_test]
+fn glyph_maintenance_leaves_framebuffer_and_scissor_as_a_render_does() {
+    let canvas = create_canvas();
+    canvas.set_width(300);
+    canvas.set_height(70);
+    let (mut renderer, mut resources) = WebGlRenderer::new(&canvas).unwrap();
+    resources.set_glyph_maintenance(GlyphMaintenance::Explicit);
+    let render_size = RenderSize {
+        width: 300,
+        height: 70,
+    };
+    let bindings = WebGlTextureBindings::new();
+
+    let font_size = 50.0;
+    let (font, glyphs) = layout_glyphs_roboto("Hello", font_size);
+    let mut scene = Scene::new(300, 70);
+    scene.set_transform(Affine::translate((0.0, f64::from(font_size))));
+    scene
+        .glyph_run(&mut resources, &font)
+        .font_size(font_size)
+        .atlas_cache(true)
+        .fill_glyphs(glyphs.into_iter())
+        .unwrap();
+    renderer
+        .render(
+            &scene,
+            &mut resources,
+            &render_size,
+            &bindings,
+            AlphaColor::TRANSPARENT,
+        )
+        .unwrap();
+
+    // The last of these passes evicts the glyphs and clears their atlas regions.
+    let config = glifo::GlyphCacheConfig::default();
+    let empty = Scene::new(300, 70);
+    for _ in 0..config.max_entry_age + config.eviction_frequency {
+        renderer
+            .render(
+                &empty,
+                &mut resources,
+                &render_size,
+                &bindings,
+                AlphaColor::TRANSPARENT,
+            )
+            .unwrap();
+        renderer.maintain_glyphs(&mut resources).unwrap();
+    }
+
+    let gl = renderer.gl_context();
+    assert!(
+        !gl.is_enabled(WebGl2RenderingContext::SCISSOR_TEST),
+        "the scissor test should be disabled after maintenance"
+    );
+    assert!(
+        gl.get_parameter(WebGl2RenderingContext::FRAMEBUFFER_BINDING)
+            .unwrap()
+            .is_null(),
+        "the canvas framebuffer should be bound after maintenance"
+    );
+    assert_eq!(
+        gl.get_error(),
+        WebGl2RenderingContext::NO_ERROR,
+        "maintenance should not produce a WebGL error"
     );
 }

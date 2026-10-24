@@ -17,8 +17,8 @@ use vello_cpu::{
     TargetInit as CpuTargetInit,
 };
 use vello_gpu::{
-    ClearSettings, RectU16, RenderSettings as GpuRenderSettings, Resources as GpuResources, Scene,
-    TargetInit as GpuTargetInit, TextureId,
+    ClearSettings, GlyphMaintenance, RectU16, RenderSettings as GpuRenderSettings,
+    Resources as GpuResources, Scene, TargetInit as GpuTargetInit, TextureId,
 };
 #[cfg(all(target_arch = "wasm32", feature = "webgl"))]
 use web_sys::WebGl2RenderingContext;
@@ -89,6 +89,8 @@ pub trait Renderer: Sized {
     fn reset_filter_effect(&mut self);
     fn reset(&mut self);
     fn set_target_init(&mut self, target_init: GpuTargetInit<'static>);
+    fn set_glyph_maintenance(&mut self, glyph_maintenance: GlyphMaintenance);
+    fn maintain_glyphs(&mut self);
     fn render(&mut self);
     fn snapshot(&mut self) -> Pixmap;
     fn register_external_texture(&mut self, pixmap: Arc<Pixmap>) -> TextureId;
@@ -291,6 +293,14 @@ impl Renderer for CpuRenderer {
 
     fn set_target_init(&mut self, target_init: GpuTargetInit<'static>) {
         self.target_init = target_init;
+    }
+
+    fn set_glyph_maintenance(&mut self, glyph_maintenance: GlyphMaintenance) {
+        self.resources.set_glyph_maintenance(glyph_maintenance);
+    }
+
+    fn maintain_glyphs(&mut self) {
+        self.resources.maintain_glyphs();
     }
 
     fn render(&mut self) {
@@ -668,6 +678,16 @@ impl Renderer for GpuRenderer {
 
     fn set_target_init(&mut self, target_init: GpuTargetInit<'static>) {
         self.target_init = target_init;
+    }
+
+    fn set_glyph_maintenance(&mut self, glyph_maintenance: GlyphMaintenance) {
+        self.resources.set_glyph_maintenance(glyph_maintenance);
+    }
+
+    fn maintain_glyphs(&mut self) {
+        self.lock_gpu_test();
+        self.renderer
+            .maintain_glyphs(&mut self.resources, &self.queue);
     }
 
     fn render(&mut self) {
@@ -1075,6 +1095,14 @@ impl Renderer for GpuRenderer {
                 panic!("WebGL only supports clearing the complete viewport")
             }
         };
+    }
+
+    fn set_glyph_maintenance(&mut self, glyph_maintenance: GlyphMaintenance) {
+        self.resources.set_glyph_maintenance(glyph_maintenance);
+    }
+
+    fn maintain_glyphs(&mut self) {
+        self.renderer.maintain_glyphs(&mut self.resources).unwrap();
     }
 
     fn render(&mut self) {
