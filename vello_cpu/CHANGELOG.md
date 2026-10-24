@@ -15,6 +15,7 @@ This release has an [MSRV][] of 1.89.
 ### Added
 
 - Support for `FilterPrimitive::ColorMatrix`. ([#1765][] by [@AdrianEddy][], [@waywardmonkeys][])
+- `Resources::set_glyph_maintenance` and `Resources::maintain_glyphs`, for aging the glyph caches once per frame instead of after every render. ([#1788][] by [@AdrianEddy][])
 
 ### Fixed
 
@@ -324,6 +325,7 @@ See also the [vello_common 0.0.1](../vello_common/CHANGELOG.md#001---2025-05-10)
 [#1763]: https://github.com/linebender/vello/pull/1763
 [#1765]: https://github.com/linebender/vello/pull/1765
 [#1787]: https://github.com/linebender/vello/pull/1787
+[#1788]: https://github.com/linebender/vello/pull/1788
 [#1803]: https://github.com/linebender/vello/pull/1803
 [#1845]: https://github.com/linebender/vello/pull/1845
 [#1853]: https://github.com/linebender/vello/pull/1853

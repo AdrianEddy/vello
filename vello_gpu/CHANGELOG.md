@@ -19,6 +19,7 @@ This release has an [MSRV][] of 1.89.
 - `Renderer::render_to_image` and `WebGlRenderer::render_to_image`, which render a scene into a new atlas image. (by [@AdrianEddy][])
 - `Resources::atlas_allocation_count`. (by [@AdrianEddy][])
 - `Scene::transform`, as `RenderContext::transform` in Vello CPU. (by [@AdrianEddy][])
+- `Resources::set_glyph_maintenance`, `Renderer::maintain_glyphs` and `WebGlRenderer::maintain_glyphs`, for aging the glyph caches once per frame instead of after every render. ([#1788][] by [@AdrianEddy][])
 
 ### Changed
 
@@ -374,6 +375,7 @@ See also the [vello_cpu 0.0.4](../vello_cpu/CHANGELOG.md#004---2025-10-17) and [
 [#1778]: https://github.com/linebender/vello/pull/1778
 [#1779]: https://github.com/linebender/vello/pull/1779
 [#1781]: https://github.com/linebender/vello/pull/1781
+[#1788]: https://github.com/linebender/vello/pull/1788
 [#1791]: https://github.com/linebender/vello/pull/1791
 [#1792]: https://github.com/linebender/vello/pull/1792
 [#1794]: https://github.com/linebender/vello/pull/1794

@@ -23,6 +23,7 @@ use vello_common::peniko::{
 };
 use vello_common::pixmap::{PixelMetadata, Pixmap};
 use vello_dev_macros::vello_test;
+use vello_gpu::GlyphMaintenance;
 
 fn render_transform_composition_rows(
     ctx: &mut impl Renderer,
@@ -1208,4 +1209,282 @@ fn glyphs_decoration_transformed(ctx: &mut impl Renderer, enable_caching: bool) 
         );
         y += buffer;
     }
+}
+
+fn draw_cached_text(ctx: &mut impl Renderer, text: &str) {
+    let font_size = 50.0;
+    let (font, glyphs) = layout_glyphs_roboto(text, font_size);
+    ctx.set_transform(Affine::translate((0.0, f64::from(font_size))));
+    ctx.set_paint(BLACK);
+    ctx.glyph_run(&font)
+        .font_size(font_size)
+        .atlas_cache(true)
+        .hint(true)
+        .fill_glyphs(glyphs.into_iter())
+        .unwrap();
+    ctx.flush();
+}
+
+/// The number of maintenance passes after which a glyph that is no longer drawn has been evicted.
+fn glyph_eviction_passes() -> u64 {
+    let config = glifo::GlyphCacheConfig::default();
+    config.max_entry_age + config.eviction_frequency
+}
+
+fn evict_all_glyphs(ctx: &mut impl Renderer) {
+    ctx.reset();
+    for _ in 0..glyph_eviction_passes() {
+        ctx.render();
+        ctx.maintain_glyphs();
+    }
+}
+
+#[vello_test(width = 300, height = 70, transparent, no_ref)]
+fn glyphs_atlas_explicit_maintenance(ctx: &mut impl Renderer) {
+    ctx.set_glyph_maintenance(GlyphMaintenance::Explicit);
+    draw_cached_text(ctx, "Hello, world!");
+    ctx.render();
+    let expected = ctx.snapshot();
+    assert!(
+        expected.data_as_u8_slice().iter().any(|&byte| byte != 0),
+        "glyphs should have been rendered"
+    );
+
+    for _ in 0..2 * glyph_eviction_passes() {
+        ctx.render();
+    }
+    assert!(
+        ctx.snapshot().data_as_u8_slice() == expected.data_as_u8_slice(),
+        "rendering should not age the glyph caches"
+    );
+
+    // The glyphs are cached again, in the atlas space their eviction freed.
+    evict_all_glyphs(ctx);
+    draw_cached_text(ctx, "Hello, world!");
+    ctx.render();
+    assert!(
+        ctx.snapshot().data_as_u8_slice() == expected.data_as_u8_slice(),
+        "glyphs cached after an eviction should render the same"
+    );
+}
+
+#[vello_test(width = 300, height = 70, transparent, no_ref)]
+fn glyphs_atlas_explicit_maintenance_unrendered(ctx: &mut impl Renderer) {
+    ctx.set_glyph_maintenance(GlyphMaintenance::Explicit);
+    draw_cached_text(ctx, "abc");
+    ctx.render();
+
+    // Cache outline and bitmap glyphs, then drop the scene without rendering it.
+    ctx.reset();
+    draw_cached_text(ctx, "Hello");
+    let font_size = 50.0;
+    let (font, glyphs) = layout_glyphs_noto_cbtf("✅👀", font_size);
+    ctx.set_transform(Affine::translate((150.0, f64::from(font_size))));
+    ctx.glyph_run(&font)
+        .font_size(font_size)
+        .atlas_cache(true)
+        .fill_glyphs(glyphs.into_iter())
+        .unwrap();
+    ctx.reset();
+    for _ in 0..glyph_eviction_passes() {
+        ctx.maintain_glyphs();
+    }
+
+    draw_cached_text(ctx, "world");
+    ctx.render();
+    let rendered = ctx.snapshot();
+    evict_all_glyphs(ctx);
+    draw_cached_text(ctx, "world");
+    ctx.render();
+    assert!(
+        ctx.snapshot().data_as_u8_slice() == rendered.data_as_u8_slice(),
+        "glyphs cached after an unrendered scene should render as in a clean atlas"
+    );
+}
+
+#[vello_test(width = 300, height = 70, transparent, no_ref)]
+fn glyphs_atlas_explicit_maintenance_image_upload(ctx: &mut impl Renderer) {
+    ctx.set_glyph_maintenance(GlyphMaintenance::Explicit);
+    draw_cached_text(ctx, "Hello, world!");
+    ctx.render();
+    evict_all_glyphs(ctx);
+
+    // On the GPU, the image is uploaded into the atlas space freed by the evicted glyphs.
+    let color = [0, 0, 255, 255];
+    let mut pixmap = Pixmap::new(300, 70);
+    for pixel in pixmap.data_as_u8_slice_mut().chunks_exact_mut(4) {
+        pixel.copy_from_slice(&color);
+    }
+    let image = ctx.get_image_source(Arc::new(pixmap));
+    ctx.set_transform(Affine::IDENTITY);
+    ctx.set_paint(Image {
+        image,
+        sampler: ImageSampler::default(),
+    });
+    ctx.fill_rect(&Rect::new(0.0, 0.0, 300.0, 70.0));
+    ctx.flush();
+    ctx.render();
+    assert!(
+        ctx.snapshot()
+            .data_as_u8_slice()
+            .chunks_exact(4)
+            .all(|pixel| pixel == color),
+        "the image should not be affected by clearing the evicted glyphs"
+    );
+}
+
+/// Rendering other scenes does not age the glyphs of a scene that has not been rendered yet, and a
+/// render that is submitted before a maintenance pass is not affected by the pass, even if the pass
+/// evicts the glyphs the render draws.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn glyphs_atlas_explicit_maintenance_wgpu() {
+    use vello_gpu::{
+        ClearSettings, RenderSize, RenderTargetConfig, Resources, Scene, TargetInit,
+        TextureBindings,
+    };
+
+    const WIDTH: u16 = 300;
+    const HEIGHT: u16 = 70;
+
+    let instance = wgpu::Instance::default();
+    let adapter =
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .expect("Failed to find an appropriate adapter");
+    let (device, queue) =
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+            .expect("Failed to create device");
+    let size = wgpu::Extent3d {
+        width: WIDTH.into(),
+        height: HEIGHT.into(),
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let target_config = RenderTargetConfig {
+        format: texture.format(),
+        width: WIDTH,
+        height: HEIGHT,
+    };
+
+    let render = |renderer: &mut vello_gpu::Renderer, resources: &mut Resources, scene: &Scene| {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        renderer
+            .render(
+                scene,
+                resources,
+                &device,
+                &queue,
+                &mut encoder,
+                &RenderSize {
+                    width: WIDTH,
+                    height: HEIGHT,
+                },
+                &view,
+                None,
+                &TextureBindings::new(),
+                TargetInit::Clear(ClearSettings::default()),
+            )
+            .unwrap();
+        encoder.finish()
+    };
+    let read_back = || {
+        let bytes_per_row =
+            (u32::from(WIDTH) * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: u64::from(bytes_per_row) * u64::from(HEIGHT),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: None,
+                },
+            },
+            size,
+        );
+        queue.submit([encoder.finish()]);
+        buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, |result| result.unwrap());
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        buffer.slice(..).get_mapped_range().unwrap().to_vec()
+    };
+
+    let draw_glyphs = |resources: &mut Resources| {
+        let mut scene = Scene::new(WIDTH, HEIGHT);
+        let font_size = 50.0;
+        let (font, glyphs) = layout_glyphs_roboto("Hello, world!", font_size);
+        scene.set_transform(Affine::translate((0.0, f64::from(font_size))));
+        scene.set_paint(BLACK);
+        scene
+            .glyph_run(resources, &font)
+            .font_size(font_size)
+            .atlas_cache(true)
+            .hint(true)
+            .fill_glyphs(glyphs.into_iter())
+            .unwrap();
+        scene
+    };
+
+    let (mut reference_renderer, mut reference_resources) =
+        vello_gpu::Renderer::new(&device, &target_config);
+    let reference_scene = draw_glyphs(&mut reference_resources);
+    queue.submit([render(
+        &mut reference_renderer,
+        &mut reference_resources,
+        &reference_scene,
+    )]);
+    let expected = read_back();
+    assert!(
+        expected.iter().any(|&byte| byte != 0),
+        "glyphs should have been rendered"
+    );
+
+    let (mut renderer, mut resources) = vello_gpu::Renderer::new(&device, &target_config);
+    resources.set_glyph_maintenance(GlyphMaintenance::Explicit);
+    let scene = draw_glyphs(&mut resources);
+
+    // The scene is rendered for the first time after many renders of another one.
+    let empty = Scene::new(WIDTH, HEIGHT);
+    for _ in 0..2 * glyph_eviction_passes() {
+        queue.submit([render(&mut renderer, &mut resources, &empty)]);
+    }
+    queue.submit([render(&mut renderer, &mut resources, &scene)]);
+    assert!(
+        read_back() == expected,
+        "rendering other scenes should not age the glyph caches"
+    );
+
+    // The glyphs are evicted by the first eviction pass at which they are older than the maximum
+    // entry age. Render the scene in the frame that ends with that pass.
+    let config = glifo::GlyphCacheConfig::default();
+    let evicting_pass =
+        (config.max_entry_age / config.eviction_frequency + 1) * config.eviction_frequency;
+    for _ in 1..evicting_pass {
+        queue.submit([render(&mut renderer, &mut resources, &empty)]);
+        renderer.maintain_glyphs(&mut resources, &device, &queue);
+    }
+    queue.submit([render(&mut renderer, &mut resources, &scene)]);
+    renderer.maintain_glyphs(&mut resources, &device, &queue);
+    assert!(
+        read_back() == expected,
+        "a render submitted before a pass should not be affected by it"
+    );
 }

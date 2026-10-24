@@ -16,6 +16,7 @@ This release has an [MSRV][] of 1.89.
 
 - `filter::color_matrix::ColorMatrix`, `PreparedFilter::ColorMatrix` and a `ProbeFeature::ColorMatrix` probe element. ([#1765][] by [@AdrianEddy][], [@waywardmonkeys][])
 - `MultiAtlasManager::allocated_count`. (by [@AdrianEddy][])
+- `GlyphMaintenance`, for choosing whether renderers age their glyph caches after every render or only when asked to. ([#1788][] by [@AdrianEddy][])
 
 ### Changed
 
@@ -363,6 +364,7 @@ See also the [vello_cpu 0.0.1](../vello_cpu/CHANGELOG.md#001---2025-05-10) relea
 [#1768]: https://github.com/linebender/vello/pull/1768
 [#1778]: https://github.com/linebender/vello/pull/1778
 [#1779]: https://github.com/linebender/vello/pull/1779
+[#1788]: https://github.com/linebender/vello/pull/1788
 [#1801]: https://github.com/linebender/vello/pull/1801
 [#1824]: https://github.com/linebender/vello/pull/1824
 [#1825]: https://github.com/linebender/vello/pull/1825

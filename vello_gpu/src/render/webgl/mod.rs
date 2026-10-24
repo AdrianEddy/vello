@@ -551,6 +551,19 @@ impl WebGlRenderer {
         result
     }
 
+    /// Run one glyph cache maintenance pass, see [`GlyphMaintenance`](crate::GlyphMaintenance).
+    ///
+    /// With [`GlyphMaintenance::Explicit`](crate::GlyphMaintenance::Explicit), call this once per
+    /// frame after the frame's last render. A pass without a render since the previous pass does
+    /// nothing, so with [`GlyphMaintenance::PerRender`](crate::GlyphMaintenance::PerRender), where
+    /// every render runs a pass, this has no effect. Like [`render`](Self::render), it may leave
+    /// the renderer's framebuffer bound and the scissor test disabled.
+    #[cfg(feature = "text")]
+    pub fn maintain_glyphs(&mut self, resources: &mut Resources) {
+        resources.maintain_glyphs(&mut self.atlas_clears);
+        self.clear_atlas_regions();
+    }
+
     /// Render a `scene` directly into an atlas layer.
     ///
     /// This renders the scene's content into the specified atlas layer, which can then

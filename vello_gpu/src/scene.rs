@@ -1043,7 +1043,13 @@ mod tests {
     #[cfg(all(feature = "text", feature = "full_image_support"))]
     use alloc::sync::Arc;
     #[cfg(all(feature = "text", feature = "full_image_support"))]
+    use alloc::vec::Vec;
+    #[cfg(all(feature = "text", feature = "full_image_support"))]
+    use core::convert::Infallible;
+    #[cfg(all(feature = "text", feature = "full_image_support"))]
     use glifo::Glyph;
+    #[cfg(all(feature = "text", feature = "full_image_support"))]
+    use vello_common::GlyphMaintenance;
     use vello_common::TextureId;
     use vello_common::geometry::RectU16;
     use vello_common::kurbo::{BezPath, Rect};
@@ -1171,5 +1177,64 @@ mod tests {
             .unwrap();
 
         assert!(resources.glyph_resources.is_some());
+    }
+
+    #[cfg(all(feature = "text", feature = "full_image_support"))]
+    #[test]
+    fn explicit_glyph_maintenance() {
+        const ROBOTO_FONT: &[u8] = include_bytes!("../../assets/roboto/Roboto-Regular.ttf");
+
+        let font = FontData::new(Blob::new(Arc::new(ROBOTO_FONT)), 0);
+        let glyphs = [Glyph {
+            id: 44,
+            x: 10.0,
+            y: 60.0,
+        }];
+
+        let mut scene = Scene::new(100, 100);
+        let mut resources = Resources::new(vello_common::multi_atlas::AtlasConfig::default());
+        resources.set_glyph_maintenance(GlyphMaintenance::Explicit);
+        scene
+            .glyph_run(&mut resources, &font)
+            .font_size(50.0)
+            .atlas_cache(true)
+            .fill_glyphs(glyphs.into_iter())
+            .unwrap();
+
+        // The glyph cache work of a render, without a device.
+        let render = |resources: &mut Resources, clears: &mut Vec<_>| {
+            resources
+                .before_render(
+                    &mut (),
+                    |_, _, _, _, _| Ok::<_, Infallible>(()),
+                    |_, _, _, _, _| Ok(()),
+                )
+                .unwrap();
+            resources.after_render(clears);
+        };
+        let cached_glyphs = |resources: &Resources| {
+            resources
+                .glyph_resources
+                .as_ref()
+                .unwrap()
+                .glyph_atlas
+                .len()
+        };
+
+        let mut clears = Vec::new();
+        render(&mut resources, &mut clears);
+        // Only the first pass follows a render.
+        for _ in 0..200 {
+            resources.maintain_glyphs(&mut clears);
+        }
+        assert_eq!(cached_glyphs(&resources), 1);
+        assert!(clears.is_empty());
+
+        for _ in 0..128 {
+            render(&mut resources, &mut clears);
+            resources.maintain_glyphs(&mut clears);
+        }
+        assert_eq!(cached_glyphs(&resources), 0);
+        assert_eq!(clears.len(), 1);
     }
 }

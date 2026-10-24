@@ -30,6 +30,7 @@ use glifo::{Glyph, renderer};
 use kurbo::{Affine, BezPath, Rect};
 use peniko::BlendMode;
 use peniko::color::{AlphaColor, Srgb};
+use vello_common::GlyphMaintenance;
 use vello_common::fearless_simd::Level;
 use vello_common::paint::ImageId;
 
@@ -106,15 +107,41 @@ impl Resources {
         }
     }
 
-    pub(crate) fn maintain_glyph_cache(&mut self) {
-        self.glyph_prep_cache.maintain();
-
-        if let Some(glyph_resources) = self.glyph_resources.as_mut() {
-            glyph_resources.maintain();
+    pub(crate) fn after_glyph_render(&mut self) {
+        if let Some(glyph_resources) = &self.glyph_resources {
             let page_count = glyph_resources.pixmaps.len();
             for page_index in 0..page_count {
                 self.image_registry.destroy_atlas_page(page_index as u32);
             }
+        }
+
+        self.rendered_since_glyph_maintenance = true;
+        if self.glyph_maintenance == GlyphMaintenance::PerRender {
+            self.maintain_glyphs();
+        }
+    }
+
+    /// Set when the glyph caches are aged. The default is [`GlyphMaintenance::PerRender`].
+    pub fn set_glyph_maintenance(&mut self, glyph_maintenance: GlyphMaintenance) {
+        self.glyph_maintenance = glyph_maintenance;
+    }
+
+    /// Run one glyph cache maintenance pass, see [`GlyphMaintenance`].
+    ///
+    /// With [`GlyphMaintenance::Explicit`], call this once per frame after the frame's last
+    /// render. A pass without a render since the previous pass does nothing, so with
+    /// [`GlyphMaintenance::PerRender`], where every render runs a pass, this has no effect.
+    pub fn maintain_glyphs(&mut self) {
+        // Every render writes all pending glyphs into the atlas, so this ensures that a glyph is
+        // never evicted before it has been written.
+        if !core::mem::take(&mut self.rendered_since_glyph_maintenance) {
+            return;
+        }
+
+        self.glyph_prep_cache.maintain();
+
+        if let Some(glyph_resources) = self.glyph_resources.as_mut() {
+            glyph_resources.maintain();
             self.clear_evicted_glyph_atlas_regions();
         }
     }

@@ -143,3 +143,21 @@ pub mod reexports {
 /// otherwise opaque to the renderer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TextureId(pub u64);
+
+/// When a renderer ages its glyph caches.
+///
+/// Each maintenance pass ages the cached glyphs by one step and periodically evicts those that
+/// have not been used for more than the cache's maximum entry age (64 passes by default).
+/// Encoding a scene that draws a glyph counts as using it, rendering the scene does not.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum GlyphMaintenance {
+    /// Run a maintenance pass at the end of every render.
+    ///
+    /// A scene that is rendered many times, or after many renders of other scenes, can lose its
+    /// cached glyphs.
+    #[default]
+    PerRender,
+    /// Only run a maintenance pass when `maintain_glyphs` is called, typically once per frame
+    /// after the frame's last render. Nothing is evicted if it is never called.
+    Explicit,
+}

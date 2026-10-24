@@ -145,6 +145,8 @@ pub use scene::{LayersConfig, MemorySettings, RenderSettings, Scene};
 #[cfg(feature = "text")]
 pub use text::{GlyphRunBuilder, GpuGlyphRunBackend};
 pub use util::DimensionConstraints;
+#[cfg(feature = "text")]
+pub use vello_common::GlyphMaintenance;
 pub use vello_common::reexports::gpu::*;
 
 use thiserror::Error;
