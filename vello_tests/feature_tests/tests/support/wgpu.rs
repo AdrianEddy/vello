@@ -5,6 +5,7 @@ use super::{Pixmap, ProbeFeature, probe};
 use vello_common::{
     TextureId,
     color::palette::css,
+    kurbo::Rect,
     paint::{ImageSource, TextureRegion},
     pixmap::PixelMetadata,
 };
@@ -148,4 +149,35 @@ pub(crate) fn render(elements: &[ProbeFeature]) -> Pixmap {
     buffer.unmap();
 
     Pixmap::from_parts(pixels, width, height, PixelMetadata::default())
+}
+
+/// Whether `Renderer::render_to_image` renders a scene, rather than panicking for a missing
+/// shader feature.
+pub(crate) fn render_to_image_succeeds() -> bool {
+    let instance = wgpu::Instance::default();
+    let adapter =
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .expect("WGPU feature tests require a GPU adapter");
+    let (device, queue) =
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+    let config = RenderTargetConfig {
+        width: 4,
+        height: 4,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+    };
+    let (mut renderer, mut resources) = Renderer::new(&device, &config);
+    let mut scene = Scene::new(4, 4);
+    scene.set_paint(css::RED);
+    scene.fill_rect(&Rect::new(0.0, 0.0, 4.0, 4.0));
+
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        renderer.render_to_image(
+            &scene,
+            &mut resources,
+            &device,
+            &queue,
+            &TextureBindings::new(),
+        )
+    }))
+    .is_ok_and(|result| result.is_ok())
 }

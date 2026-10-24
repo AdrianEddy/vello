@@ -49,12 +49,10 @@ use crate::{
 use alloc::vec::Vec;
 use alloc::{sync::Arc, vec};
 use core::{fmt::Debug, num::NonZeroU64, ops::Range};
-#[cfg(feature = "text")]
-use glifo::PendingClearRect;
 use hashbrown::{HashMap, hash_map::Entry};
 use vello_common::color::{AlphaColor, Srgb};
 use vello_common::image_cache::{ImageCache, ImageResource};
-use vello_common::multi_atlas::{AtlasConfig, AtlasId};
+use vello_common::multi_atlas::{AtlasConfig, AtlasError, AtlasId};
 use vello_common::{
     TextureId,
     encode::{
@@ -243,8 +241,8 @@ pub struct Renderer {
         expect(dead_code, reason = "only read when probing")
     )]
     target_format: wgpu::TextureFormat,
-    #[cfg(feature = "text")]
-    atlas_clear_scratch: Vec<u8>,
+    /// Freed atlas regions that must be cleared before they are reused.
+    atlas_clears: Vec<(AtlasId, RectU16)>,
 }
 
 impl Renderer {
@@ -294,8 +292,7 @@ impl Renderer {
             scratch_buffers: ScratchBuffers::default(),
             layers_config: layer_config,
             target_format: render_target_config.format,
-            #[cfg(feature = "text")]
-            atlas_clear_scratch: Vec::new(),
+            atlas_clears: Vec::new(),
         };
 
         (renderer, resources)
@@ -341,6 +338,9 @@ impl Renderer {
     ///
     /// The [WebGPU render pass validation rules] require every color and depth attachment view in
     /// a render pass to have matching render extents.
+    ///
+    /// Renders share buffers and textures that are written through `queue`, so `encoder` must be
+    /// submitted before the next call to `render`.
     ///
     /// [WebGPU render pass validation rules]: https://gpuweb.github.io/gpuweb/#abstract-opdef-gpurenderpassdescriptor-valid-usage
     pub fn render(
@@ -399,15 +399,14 @@ impl Renderer {
             &scene.encoded_paints,
             target_init,
             RootTarget::UserSurface,
+            None,
             texture_bindings,
         );
 
         #[cfg(feature = "text")]
-        resources.after_render(self, |renderer, rect| {
-            clear_atlas_region(queue, renderer, rect);
-
-            Ok::<(), RenderError>(())
-        })?;
+        resources.after_render(&mut self.atlas_clears);
+        resources.free_destroyed_images(&mut self.atlas_clears);
+        self.clear_atlas_regions(device, queue);
         result
     }
 
@@ -425,6 +424,7 @@ impl Renderer {
     /// ensuring atlas content is committed before any subsequent
     /// [`render`](Self::render) call (the two methods share GPU resources that
     /// are staged by `queue.write_*` and only applied on the next `queue.submit`).
+    /// For the same reason, encoders passed to `render` must be submitted before this call.
     ///
     /// `texture_bindings` provides [externally bound textures](`TextureBindings`)
     /// referenced by the scene. Pass `&TextureBindings::new()` if the scene does
@@ -440,17 +440,37 @@ impl Renderer {
         atlas_id: AtlasId,
         texture_bindings: &TextureBindings,
     ) -> Result<(), RenderError> {
+        let (width, height) = atlas_config.atlas_size;
+        self.render_to_atlas_region(
+            scene,
+            atlas_count,
+            RenderSize { width, height },
+            None,
+            device,
+            queue,
+            atlas_id,
+            texture_bindings,
+        )
+    }
+
+    /// Renders `scene` into the atlas page `atlas_id`, placed at `viewport` if given, and submits
+    /// the render.
+    fn render_to_atlas_region(
+        &mut self,
+        scene: &Scene,
+        atlas_count: u32,
+        atlas_render_size: RenderSize,
+        viewport: Option<RectU16>,
+        device: &Device,
+        queue: &Queue,
+        atlas_id: AtlasId,
+        texture_bindings: &TextureBindings,
+    ) -> Result<(), RenderError> {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Render to Atlas Encoder"),
         });
 
         Programs::maybe_create_atlas_textures(device, &mut self.programs.resources, atlas_count);
-
-        let (atlas_width, atlas_height) = atlas_config.atlas_size;
-        let atlas_render_size = RenderSize {
-            width: atlas_width,
-            height: atlas_height,
-        };
 
         let layer_view =
             self.programs.resources.atlas_texture_views[atlas_id.as_u32() as usize].clone();
@@ -472,6 +492,7 @@ impl Renderer {
             encoded_paints,
             TargetInit::SrcOver,
             RootTarget::AtlasLayer,
+            viewport,
             texture_bindings,
         );
         self.dummy_image_cache = Some(dummy_image_cache);
@@ -481,6 +502,64 @@ impl Renderer {
         queue.submit(Some(encoder.finish()));
 
         result
+    }
+
+    /// Renders `scene` into a new image in the image atlas and returns the image's ID.
+    ///
+    /// The image has the scene's size and is painted like an uploaded image, with
+    /// [`ImageSource::opaque_id`]. Destroy it with [`Resources::destroy_image`]; like
+    /// [`render`](Self::render), this call frees the images destroyed before it.
+    ///
+    /// The scene can't paint images from the atlas, which includes glyphs cached with
+    /// `atlas_cache(true)`: rendering such a scene fails with [`RenderError::MissingImage`].
+    ///
+    /// The render is submitted before this returns. Renders share buffers and textures written
+    /// through `queue`, so encoders passed to `render` must be submitted before this call.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `full_image_support` feature is disabled.
+    #[track_caller]
+    pub fn render_to_image(
+        &mut self,
+        scene: &Scene,
+        resources: &mut Resources,
+        device: &Device,
+        queue: &Queue,
+        texture_bindings: &TextureBindings,
+    ) -> Result<vello_common::paint::ImageId, RenderError> {
+        if !cfg!(feature = "full_image_support") {
+            panic!("rendered images require the `full_image_support` feature");
+        }
+
+        resources.free_destroyed_images(&mut self.atlas_clears);
+        self.clear_atlas_regions(device, queue);
+
+        let (width, height) = (scene.width(), scene.height());
+        let image_id = resources
+            .image_cache
+            .allocate(width, height, IMAGE_PADDING)?;
+        let image = resources.image_cache.get(image_id).unwrap();
+        let atlas_id = image.atlas_id;
+        let [x, y] = image.offset;
+        let atlas_count = u32::try_from(resources.image_cache.atlas_count()).unwrap();
+        let result = self.render_to_atlas_region(
+            scene,
+            atlas_count,
+            RenderSize { width, height },
+            Some(RectU16::new(x, y, x + width, y + height)),
+            device,
+            queue,
+            atlas_id,
+            texture_bindings,
+        );
+        if let Err(error) = result {
+            // Rendering fails before it writes anything, so the region is still transparent.
+            resources.image_cache.deallocate(image_id);
+            return Err(error);
+        }
+
+        Ok(image_id)
     }
 
     fn current_allocations(&self) -> IntermediateTextureAllocations {
@@ -510,6 +589,7 @@ impl Renderer {
         encoded_paints: &[EncodedPaint],
         target_init: TargetInit<'_>,
         root_output_target: RootTarget,
+        root_viewport: Option<RectU16>,
         texture_bindings: &TextureBindings,
     ) -> Result<(), RenderError> {
         self.programs.depth_cleared_this_frame = false;
@@ -583,6 +663,7 @@ impl Renderer {
             external_texture_bind_groups: HashMap::new(),
             scratch_buffers: &mut self.scratch_buffers,
             root_load_op: wgpu::LoadOp::Load,
+            root_viewport,
         };
 
         ctx.init_root_clear(target_init, root_output_target);
@@ -610,6 +691,10 @@ impl Renderer {
     /// 1. Reserves space in the image cache
     /// 2. Writes the image data directly to the atlas
     /// 3. Returns the `ImageId` for use in rendering
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the image is empty or the image atlas has no room for it.
     #[track_caller]
     pub fn upload_image<T: AtlasWriter>(
         &mut self,
@@ -618,7 +703,7 @@ impl Renderer {
         queue: &Queue,
         encoder: &mut CommandEncoder,
         writer: &T,
-    ) -> vello_common::paint::ImageId {
+    ) -> Result<vello_common::paint::ImageId, AtlasError> {
         self.upload_image_with(
             &mut resources.image_cache,
             device,
@@ -638,16 +723,16 @@ impl Renderer {
         encoder: &mut CommandEncoder,
         writer: &T,
         padding: u16,
-    ) -> vello_common::paint::ImageId {
+    ) -> Result<vello_common::paint::ImageId, AtlasError> {
         if !cfg!(feature = "full_image_support") {
             panic!("uploaded images require the `full_image_support` feature");
         }
 
         let width = writer.width();
         let height = writer.height();
-        let image_id = image_cache.allocate(width, height, padding).unwrap();
+        let image_id = image_cache.allocate(width, height, padding)?;
         self.write_to_atlas(image_cache, device, queue, encoder, image_id, writer, None);
-        image_id
+        Ok(image_id)
     }
 
     /// Write pixel data to an existing atlas allocation.
@@ -690,29 +775,6 @@ impl Renderer {
         );
     }
 
-    /// Destroy an image from the cache and clear the allocated slot in the atlas.
-    pub fn destroy_image(
-        &mut self,
-        resources: &mut Resources,
-        encoder: &mut CommandEncoder,
-        image_id: vello_common::paint::ImageId,
-    ) {
-        if let Some(image_resource) = resources.image_cache.deallocate(image_id) {
-            let padding = image_resource.padding;
-
-            self.clear_atlas_region(
-                encoder,
-                image_resource.atlas_id,
-                [
-                    image_resource.offset[0] - padding,
-                    image_resource.offset[1] - padding,
-                ],
-                image_resource.width + padding * 2,
-                image_resource.height + padding * 2,
-            );
-        }
-    }
-
     /// Returns an individual image atlas texture.
     pub fn atlas_texture(&self, atlas_id: AtlasId) -> &Texture {
         self.programs
@@ -722,47 +784,54 @@ impl Renderer {
             .unwrap()
     }
 
-    /// Clear a specific region of the atlas texture.
-    fn clear_atlas_region(
-        &mut self,
-        encoder: &mut CommandEncoder,
-        atlas_id: AtlasId,
-        offset: [u16; 2],
-        width: u16,
-        height: u16,
-    ) {
-        let layer_view =
-            self.programs.resources.atlas_texture_views[atlas_id.as_u32() as usize].clone();
+    /// Clears the regions in `atlas_clears` to transparent, in a submission of its own.
+    ///
+    /// The submission orders the clears after all work submitted so far and before anything
+    /// written to the regions once they are reused.
+    fn clear_atlas_regions(&mut self, device: &Device, queue: &Queue) {
+        let atlas_views = &self.programs.resources.atlas_texture_views;
+        // Atlas textures are created zeroed, so pages without one have nothing to clear.
+        self.atlas_clears
+            .retain(|(atlas_id, _)| (atlas_id.as_u32() as usize) < atlas_views.len());
+        if self.atlas_clears.is_empty() {
+            return;
+        }
+        self.atlas_clears
+            .sort_unstable_by_key(|(atlas_id, _)| atlas_id.as_u32());
 
-        let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
-            label: Some("Clear Atlas Region"),
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: &layer_view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    // Don't clear entire texture, just the scissor region
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-                depth_slice: None,
-            })],
-            depth_stencil_attachment: None,
-            occlusion_query_set: None,
-            timestamp_writes: None,
-            multiview_mask: None,
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Clear Atlas Regions"),
         });
-
-        // Set scissor rectangle to limit clearing to specific region
-        render_pass.set_scissor_rect(
-            u32::from(offset[0]),
-            u32::from(offset[1]),
-            u32::from(width),
-            u32::from(height),
-        );
-        // Use atlas clear pipeline to render transparent pixels
-        render_pass.set_pipeline(&self.programs.atlas_clear_pipeline);
-        // Draw fullscreen quad
-        render_pass.draw(0..4, 0..1);
+        for page in self.atlas_clears.chunk_by(|a, b| a.0 == b.0) {
+            let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+                label: Some("Clear Atlas Regions"),
+                color_attachments: &[Some(RenderPassColorAttachment {
+                    view: &atlas_views[page[0].0.as_u32() as usize],
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            render_pass.set_pipeline(&self.programs.atlas_clear_pipeline);
+            for (_, region) in page {
+                render_pass.set_scissor_rect(
+                    u32::from(region.x0),
+                    u32::from(region.y0),
+                    u32::from(region.width()),
+                    u32::from(region.height()),
+                );
+                render_pass.draw(0..4, 0..1);
+            }
+        }
+        queue.submit([encoder.finish()]);
+        self.atlas_clears.clear();
     }
 
     fn prepare_gpu_encoded_paints(
@@ -782,7 +851,8 @@ impl Renderer {
             let gpu_paint = match paint {
                 EncodedPaint::Image(img) => match &img.source {
                     ImageSource::OpaqueId { id, .. } => {
-                        let image_resource = image_cache.get(*id).unwrap();
+                        let image_resource =
+                            image_cache.get(*id).ok_or(RenderError::MissingImage(*id))?;
                         self.encode_image_paint(img, image_resource)
                     }
                     ImageSource::ExternalTexture {
@@ -956,36 +1026,6 @@ impl Renderer {
             _padding1: [0, 0],
         })
     }
-}
-
-#[cfg(feature = "text")]
-fn clear_atlas_region(queue: &Queue, renderer: &mut Renderer, rect: &PendingClearRect) {
-    // TODO: Can we optimize this more?
-    let byte_count = rect.width as usize * rect.height as usize * 4;
-    renderer.atlas_clear_scratch.resize(byte_count, 0);
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: renderer.atlas_texture(AtlasId::new(rect.page_index)),
-            mip_level: 0,
-            origin: wgpu::Origin3d {
-                x: rect.x as u32,
-                y: rect.y as u32,
-                z: 0,
-            },
-            aspect: wgpu::TextureAspect::All,
-        },
-        &renderer.atlas_clear_scratch[..byte_count],
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(rect.width as u32 * 4),
-            rows_per_image: None,
-        },
-        Extent3d {
-            width: rect.width as u32,
-            height: rect.height as u32,
-            depth_or_array_layers: 1,
-        },
-    );
 }
 
 /// Defines the GPU resources and pipelines for rendering.
@@ -2790,6 +2830,8 @@ struct RendererContext<'a> {
     external_texture_bind_groups: HashMap<ExternalTextureBindings, BindGroup>,
     scratch_buffers: &'a mut ScratchBuffers,
     root_load_op: wgpu::LoadOp<wgpu::Color>,
+    /// Where the root is placed in the target, if not at the origin.
+    root_viewport: Option<RectU16>,
 }
 
 impl RendererContext<'_> {
@@ -2992,6 +3034,17 @@ impl RendererContext<'_> {
             timestamp_writes: None,
             multiview_mask: None,
         });
+        if let (DrawPassTarget::Root(_), Some(viewport)) = (target, self.root_viewport) {
+            // Primitives are clipped to the viewport, which confines the render to it.
+            render_pass.set_viewport(
+                f32::from(viewport.x0),
+                f32::from(viewport.y0),
+                f32::from(viewport.width()),
+                f32::from(viewport.height()),
+                0.0,
+                1.0,
+            );
+        }
         render_pass.set_bind_group(0, bind_group, &[]);
         render_pass.set_bind_group(2, &self.programs.resources.encoded_paints_bind_group, &[]);
         render_pass.set_bind_group(3, &self.programs.resources.gradient_bind_group, &[]);

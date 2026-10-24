@@ -575,13 +575,16 @@ mod macos {
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("vello_gpu_wgpu_video image upload"),
                     });
-            let id = render_context.renderer.upload_image(
-                resources,
-                &render_context.device,
-                &render_context.queue,
-                &mut encoder,
-                &pixmap,
-            );
+            let id = render_context
+                .renderer
+                .upload_image(
+                    resources,
+                    &render_context.device,
+                    &render_context.queue,
+                    &mut encoder,
+                    &pixmap,
+                )
+                .expect("failed to upload the image to the atlas");
             render_context.submit(encoder.finish());
 
             Self { id, width, height }

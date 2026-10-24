@@ -16,10 +16,19 @@ This release has an [MSRV][] of 1.89.
 
 - Renderer probing in the wgpu backend through `Renderer::probe`, with the `probe` feature. (by [@LaurenzV][])
 - Support for `FilterPrimitive::ColorMatrix`, behind the new `filter_color_matrix` shader feature (part of `all_shader_features`). ([#1765][] by [@AdrianEddy][], [@waywardmonkeys][])
+- `Renderer::render_to_image` and `WebGlRenderer::render_to_image`, which render a scene into a new atlas image. (by [@AdrianEddy][])
+- `Resources::atlas_allocation_count`. (by [@AdrianEddy][])
+
+### Changed
+
+- Breaking change: `destroy_image` moved from `Renderer` and `WebGlRenderer` to `Resources`; the next `render` frees the image's atlas region. ([#1739][] by [@AdrianEddy][])
+- Breaking change: `Renderer::upload_image` returns a `Result`, failing instead of panicking when the image is empty or doesn't fit in the atlas, as `WebGlRenderer::upload_image` does. (by [@AdrianEddy][])
 
 ### Fixed
 
 - A potential division by zero in `clip_color` for gray colors in the `Color` and `Luminosity` blend modes. ([#2000][] by [@zlstringham][])
+- Images uploaded and glyphs cached into the atlas region of a destroyed image are no longer erased by that region's clear. ([#1739][] by [@AdrianEddy][])
+- The wgpu renderer returns `RenderError::MissingImage` for an image that isn't in the atlas instead of panicking. (by [@AdrianEddy][])
 
 ## [0.3.0][] - 2026-10-02
 
@@ -352,6 +361,7 @@ See also the [vello_cpu 0.0.4](../vello_cpu/CHANGELOG.md#004---2025-10-17) and [
 [#1726]: https://github.com/linebender/vello/pull/1726
 [#1734]: https://github.com/linebender/vello/pull/1734
 [#1735]: https://github.com/linebender/vello/pull/1735
+[#1739]: https://github.com/linebender/vello/pull/1739
 [#1747]: https://github.com/linebender/vello/pull/1747
 [#1750]: https://github.com/linebender/vello/pull/1750
 [#1757]: https://github.com/linebender/vello/pull/1757

@@ -15,6 +15,11 @@ This release has an [MSRV][] of 1.89.
 ### Added
 
 - `filter::color_matrix::ColorMatrix`, `PreparedFilter::ColorMatrix` and a `ProbeFeature::ColorMatrix` probe element. ([#1765][] by [@AdrianEddy][], [@waywardmonkeys][])
+- `MultiAtlasManager::allocated_count`. (by [@AdrianEddy][])
+
+### Changed
+
+- Breaking change: `MultiAtlasManager::try_allocate` rejects an empty size with the new `AtlasError::EmptyTexture` instead of adding atlases until `max_atlases` is reached. (by [@AdrianEddy][])
 
 ### Optimized
 

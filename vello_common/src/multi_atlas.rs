@@ -161,6 +161,10 @@ impl MultiAtlasManager {
 
     /// Try to allocate space for an image with the given dimensions.
     pub fn try_allocate(&mut self, width: u16, height: u16) -> Result<AtlasAllocation, AtlasError> {
+        // The allocator never fits an empty size, so it would add atlases until the limit.
+        if width == 0 || height == 0 {
+            return Err(AtlasError::EmptyTexture { width, height });
+        }
         // Check if the image is too large for any atlas
         if width > self.config.atlas_size.0 || height > self.config.atlas_size.1 {
             return Err(AtlasError::TextureTooLarge {
@@ -407,6 +411,14 @@ impl MultiAtlasManager {
             .collect()
     }
 
+    /// Get the number of allocations in all atlases.
+    pub fn allocated_count(&self) -> u32 {
+        self.atlases
+            .iter()
+            .map(|atlas| atlas.stats.allocated_count)
+            .sum()
+    }
+
     /// Get the number of atlases.
     pub fn atlas_count(&self) -> usize {
         self.atlases.len()
@@ -450,6 +462,14 @@ pub enum AtlasError {
         max_width: u16,
         /// The maximum texture height supported by the atlas.
         max_height: u16,
+    },
+    /// The requested texture size has no area.
+    #[error("Texture has no area ({width}x{height})")]
+    EmptyTexture {
+        /// The width of the requested texture.
+        width: u16,
+        /// The height of the requested texture.
+        height: u16,
     },
     /// The specified atlas was not found.
     #[error("Atlas with Id {0:?} not found")]
@@ -1015,5 +1035,24 @@ mod tests {
 
         let allocation2 = manager.try_allocate(256, 256).unwrap();
         assert_eq!(allocation2.atlas_id.as_u32(), 2);
+    }
+
+    #[test]
+    fn test_empty_size_is_rejected_without_growing() {
+        let mut manager = MultiAtlasManager::new(AtlasConfig {
+            initial_atlas_count: 0,
+            max_atlases: 3,
+            atlas_size: (256, 256),
+            allocation_strategy: AllocationStrategy::FirstFit,
+            auto_grow: true,
+        });
+
+        for (width, height) in [(0, 10), (10, 0), (0, 0)] {
+            assert!(matches!(
+                manager.try_allocate(width, height),
+                Err(AtlasError::EmptyTexture { width: w, height: h }) if (w, h) == (width, height)
+            ));
+        }
+        assert_eq!(manager.atlas_count(), 0);
     }
 }
