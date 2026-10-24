@@ -14,7 +14,7 @@ use vello_common::peniko::{Extend, ImageQuality, ImageSampler};
 use vello_cpu::{Level, RenderMode};
 
 use crate::renderer::{GpuRenderer, Renderer};
-use crate::util::check_ref;
+use crate::util::{IDENTITY_MATRIX, check_ref, create_nv12_external_texture};
 
 /// Magnification of the 4×2 test textures, so each texel covers a visible block.
 const SCALE: u16 = 16;
@@ -28,15 +28,6 @@ const CHECKER_UV_PLANE: [u8; 4] = [0, 255, 255, 0];
 const RAMP_Y_PLANE: [u8; 8] = [10, 20, 30, 40, 50, 60, 70, 80];
 /// One interleaved Cb/Cr pair per 2×2 luma block.
 const RAMP_UV_PLANE: [u8; 4] = [100, 110, 200, 210];
-
-/// Maps each pixel to its raw `[Y, Cb, Cr]` sample.
-#[rustfmt::skip]
-const IDENTITY_MATRIX: [f32; 16] = [
-    1.0, 0.0, 0.0, 0.0,
-    0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 1.0, 0.0,
-    0.0, 0.0, 0.0, 1.0,
-];
 
 /// Each block shows its raw `[Y, Cb, Cr]` sample, so the colors show that both planes are bound
 /// and each Cb/Cr pair covers a 2×2 luma block. Nearest sampling keeps the blocks hard-edged.
@@ -142,93 +133,4 @@ fn check_nv12(
     ctx.set_paint_transform(Affine::scale(f64::from(SCALE)));
     ctx.fill_rect(&canvas);
     check_ref(&mut ctx, name, name, 1, 0, true, &[]);
-}
-
-/// Creates a two-plane NV12 external texture: a full-resolution `R8Unorm` Y plane and a
-/// half-resolution `Rg8Unorm` interleaved Cb/Cr plane, converted with `yuv_conversion_matrix`.
-fn create_nv12_external_texture(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    width: u32,
-    height: u32,
-    y_plane: &[u8],
-    uv_plane: &[u8],
-    yuv_conversion_matrix: [f32; 16],
-) -> wgpu::ExternalTexture {
-    let y_view = create_plane_view(
-        device,
-        queue,
-        wgpu::TextureFormat::R8Unorm,
-        width,
-        height,
-        y_plane,
-        width,
-    );
-    let uv_view = create_plane_view(
-        device,
-        queue,
-        wgpu::TextureFormat::Rg8Unorm,
-        width / 2,
-        height / 2,
-        uv_plane,
-        width,
-    );
-    #[rustfmt::skip]
-    let identity_gamut = [
-        1.0, 0.0, 0.0,
-        0.0, 1.0, 0.0,
-        0.0, 0.0, 1.0,
-    ];
-    device.create_external_texture(
-        &wgpu::ExternalTextureDescriptor {
-            label: Some("Test NV12 External Texture"),
-            width,
-            height,
-            format: wgpu::ExternalTextureFormat::Nv12,
-            yuv_conversion_matrix,
-            gamut_conversion_matrix: identity_gamut,
-            src_transfer_function: wgpu::ExternalTextureTransferFunction::default(),
-            dst_transfer_function: wgpu::ExternalTextureTransferFunction::default(),
-            sample_transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-            load_transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-        },
-        &[&y_view, &uv_view],
-    )
-}
-
-fn create_plane_view(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    format: wgpu::TextureFormat,
-    width: u32,
-    height: u32,
-    data: &[u8],
-    bytes_per_row: u32,
-) -> wgpu::TextureView {
-    let size = wgpu::Extent3d {
-        width,
-        height,
-        depth_or_array_layers: 1,
-    };
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Test External Texture Plane"),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
-    queue.write_texture(
-        texture.as_image_copy(),
-        data,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(bytes_per_row),
-            rows_per_image: None,
-        },
-        size,
-    );
-    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }

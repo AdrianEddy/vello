@@ -16,6 +16,10 @@ This release has an [MSRV][] of 1.89.
 
 - Renderer probing in the wgpu backend through `Renderer::probe`, with the `probe` feature. (by [@LaurenzV][])
 
+### Changed
+
+- Breaking change: `Renderer::render` takes a `RenderRegion`, which can confine rendering to rectangles of the target. ([#1737][] by [@AdrianEddy][])
+
 ### Fixed
 
 - A potential division by zero in `clip_color` for gray colors in the `Color` and `Luminosity` blend modes. ([#2000][] by [@zlstringham][])
@@ -351,6 +355,7 @@ See also the [vello_cpu 0.0.4](../vello_cpu/CHANGELOG.md#004---2025-10-17) and [
 [#1726]: https://github.com/linebender/vello/pull/1726
 [#1734]: https://github.com/linebender/vello/pull/1734
 [#1735]: https://github.com/linebender/vello/pull/1735
+[#1737]: https://github.com/linebender/vello/pull/1737
 [#1747]: https://github.com/linebender/vello/pull/1747
 [#1750]: https://github.com/linebender/vello/pull/1750
 [#1757]: https://github.com/linebender/vello/pull/1757

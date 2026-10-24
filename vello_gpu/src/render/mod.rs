@@ -30,6 +30,8 @@ pub use webgl::{
     probe::{WebGlPendingProbe, WebGlProbeError, WebGlProbeStatus},
 };
 #[cfg(feature = "wgpu")]
-pub use wgpu::{AtlasWriter, RenderTargetConfig, Renderer, TextureBinding, TextureBindings};
+pub use wgpu::{
+    AtlasWriter, RenderRegion, RenderTargetConfig, Renderer, TextureBinding, TextureBindings,
+};
 #[cfg(all(feature = "wgpu", feature = "probe"))]
 pub use wgpu::{WgpuPendingProbe, WgpuProbeError, WgpuProbeStatus};

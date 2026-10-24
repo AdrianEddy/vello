@@ -46,7 +46,8 @@ mod macos {
     };
     use vello_common::pixmap::{PixelMetadata, Pixmap};
     use vello_gpu::{
-        ClearSettings, RenderSize, Resources, Scene, TargetInit, TextureBindings, TextureId,
+        ClearSettings, RenderRegion, RenderSize, Resources, Scene, TargetInit, TextureBindings,
+        TextureId,
     };
     use winit::application::ApplicationHandler;
     use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
@@ -439,6 +440,7 @@ mod macos {
                     Some(&self.render_context.depth_texture_view),
                     &bindings,
                     TargetInit::Clear(ClearSettings::default()),
+                    RenderRegion::Viewport,
                 )
                 .expect("Vello GPU render failed");
 
