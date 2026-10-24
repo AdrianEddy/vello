@@ -1420,7 +1420,7 @@ impl Programs {
                 0 => Uint32x2,
                 1 => Uint32x2,
                 2 => Uint32x2,
-                3 => Uint32,
+                3 => Float32x4,
             ],
         };
         let create_clear_pipeline = |label, format| {
@@ -3257,7 +3257,7 @@ impl RendererContext<'_> {
         };
         let bounds = RectU16::new(0, 0, target_size[0], target_size[1]);
         let target_size = target_size.map(u32::from);
-        let color = color.premultiply().to_rgba8().to_u32();
+        let color = color.premultiply().components;
         self.scratch_buffers.clear_instances.clear();
         self.scratch_buffers.clear_instances.extend(
             rects

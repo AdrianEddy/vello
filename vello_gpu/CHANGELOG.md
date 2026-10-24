@@ -19,6 +19,7 @@ This release has an [MSRV][] of 1.89.
 ### Fixed
 
 - A potential division by zero in `clip_color` for gray colors in the `Color` and `Luminosity` blend modes. ([#2000][] by [@zlstringham][])
+- `ClearSettings::Rects` clears now use the unquantized premultiplied color, like viewport clears, instead of an RGBA8 approximation. (by [@AdrianEddy][])
 
 ## [0.3.0][] - 2026-10-02
 
