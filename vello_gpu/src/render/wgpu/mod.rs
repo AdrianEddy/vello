@@ -49,8 +49,6 @@ use crate::{
 use alloc::vec::Vec;
 use alloc::{sync::Arc, vec};
 use core::{fmt::Debug, num::NonZeroU64, ops::Range};
-#[cfg(feature = "text")]
-use glifo::PendingClearRect;
 use hashbrown::{HashMap, hash_map::Entry};
 use vello_common::color::{AlphaColor, Srgb};
 use vello_common::image_cache::{ImageCache, ImageResource};
@@ -243,8 +241,8 @@ pub struct Renderer {
         expect(dead_code, reason = "only read when probing")
     )]
     target_format: wgpu::TextureFormat,
-    #[cfg(feature = "text")]
-    atlas_clear_scratch: Vec<u8>,
+    /// Freed atlas regions that must be cleared before they are reused.
+    atlas_clears: Vec<(AtlasId, RectU16)>,
 }
 
 impl Renderer {
@@ -294,8 +292,7 @@ impl Renderer {
             scratch_buffers: ScratchBuffers::default(),
             layers_config: layer_config,
             target_format: render_target_config.format,
-            #[cfg(feature = "text")]
-            atlas_clear_scratch: Vec::new(),
+            atlas_clears: Vec::new(),
         };
 
         (renderer, resources)
@@ -341,6 +338,9 @@ impl Renderer {
     ///
     /// The [WebGPU render pass validation rules] require every color and depth attachment view in
     /// a render pass to have matching render extents.
+    ///
+    /// Renders share buffers and textures that are written through `queue`, so `encoder` must be
+    /// submitted before the next call to `render`.
     ///
     /// [WebGPU render pass validation rules]: https://gpuweb.github.io/gpuweb/#abstract-opdef-gpurenderpassdescriptor-valid-usage
     pub fn render(
@@ -403,11 +403,9 @@ impl Renderer {
         );
 
         #[cfg(feature = "text")]
-        resources.after_render(self, |renderer, rect| {
-            clear_atlas_region(queue, renderer, rect);
-
-            Ok::<(), RenderError>(())
-        })?;
+        resources.after_render(&mut self.atlas_clears);
+        resources.free_destroyed_images(&mut self.atlas_clears);
+        self.clear_atlas_regions(device, queue);
         result
     }
 
@@ -425,6 +423,7 @@ impl Renderer {
     /// ensuring atlas content is committed before any subsequent
     /// [`render`](Self::render) call (the two methods share GPU resources that
     /// are staged by `queue.write_*` and only applied on the next `queue.submit`).
+    /// For the same reason, encoders passed to `render` must be submitted before this call.
     ///
     /// `texture_bindings` provides [externally bound textures](`TextureBindings`)
     /// referenced by the scene. Pass `&TextureBindings::new()` if the scene does
@@ -690,29 +689,6 @@ impl Renderer {
         );
     }
 
-    /// Destroy an image from the cache and clear the allocated slot in the atlas.
-    pub fn destroy_image(
-        &mut self,
-        resources: &mut Resources,
-        encoder: &mut CommandEncoder,
-        image_id: vello_common::paint::ImageId,
-    ) {
-        if let Some(image_resource) = resources.image_cache.deallocate(image_id) {
-            let padding = image_resource.padding;
-
-            self.clear_atlas_region(
-                encoder,
-                image_resource.atlas_id,
-                [
-                    image_resource.offset[0] - padding,
-                    image_resource.offset[1] - padding,
-                ],
-                image_resource.width + padding * 2,
-                image_resource.height + padding * 2,
-            );
-        }
-    }
-
     /// Returns an individual image atlas texture.
     pub fn atlas_texture(&self, atlas_id: AtlasId) -> &Texture {
         self.programs
@@ -722,47 +698,54 @@ impl Renderer {
             .unwrap()
     }
 
-    /// Clear a specific region of the atlas texture.
-    fn clear_atlas_region(
-        &mut self,
-        encoder: &mut CommandEncoder,
-        atlas_id: AtlasId,
-        offset: [u16; 2],
-        width: u16,
-        height: u16,
-    ) {
-        let layer_view =
-            self.programs.resources.atlas_texture_views[atlas_id.as_u32() as usize].clone();
+    /// Clears the regions in `atlas_clears` to transparent, in a submission of its own.
+    ///
+    /// The submission orders the clears after all work submitted so far and before anything
+    /// written to the regions once they are reused.
+    fn clear_atlas_regions(&mut self, device: &Device, queue: &Queue) {
+        let atlas_views = &self.programs.resources.atlas_texture_views;
+        // Atlas textures are created zeroed, so pages without one have nothing to clear.
+        self.atlas_clears
+            .retain(|(atlas_id, _)| (atlas_id.as_u32() as usize) < atlas_views.len());
+        if self.atlas_clears.is_empty() {
+            return;
+        }
+        self.atlas_clears
+            .sort_unstable_by_key(|(atlas_id, _)| atlas_id.as_u32());
 
-        let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
-            label: Some("Clear Atlas Region"),
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: &layer_view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    // Don't clear entire texture, just the scissor region
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-                depth_slice: None,
-            })],
-            depth_stencil_attachment: None,
-            occlusion_query_set: None,
-            timestamp_writes: None,
-            multiview_mask: None,
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Clear Atlas Regions"),
         });
-
-        // Set scissor rectangle to limit clearing to specific region
-        render_pass.set_scissor_rect(
-            u32::from(offset[0]),
-            u32::from(offset[1]),
-            u32::from(width),
-            u32::from(height),
-        );
-        // Use atlas clear pipeline to render transparent pixels
-        render_pass.set_pipeline(&self.programs.atlas_clear_pipeline);
-        // Draw fullscreen quad
-        render_pass.draw(0..4, 0..1);
+        for page in self.atlas_clears.chunk_by(|a, b| a.0 == b.0) {
+            let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+                label: Some("Clear Atlas Regions"),
+                color_attachments: &[Some(RenderPassColorAttachment {
+                    view: &atlas_views[page[0].0.as_u32() as usize],
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            render_pass.set_pipeline(&self.programs.atlas_clear_pipeline);
+            for (_, region) in page {
+                render_pass.set_scissor_rect(
+                    u32::from(region.x0),
+                    u32::from(region.y0),
+                    u32::from(region.width()),
+                    u32::from(region.height()),
+                );
+                render_pass.draw(0..4, 0..1);
+            }
+        }
+        queue.submit([encoder.finish()]);
+        self.atlas_clears.clear();
     }
 
     fn prepare_gpu_encoded_paints(
@@ -956,36 +939,6 @@ impl Renderer {
             _padding1: [0, 0],
         })
     }
-}
-
-#[cfg(feature = "text")]
-fn clear_atlas_region(queue: &Queue, renderer: &mut Renderer, rect: &PendingClearRect) {
-    // TODO: Can we optimize this more?
-    let byte_count = rect.width as usize * rect.height as usize * 4;
-    renderer.atlas_clear_scratch.resize(byte_count, 0);
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: renderer.atlas_texture(AtlasId::new(rect.page_index)),
-            mip_level: 0,
-            origin: wgpu::Origin3d {
-                x: rect.x as u32,
-                y: rect.y as u32,
-                z: 0,
-            },
-            aspect: wgpu::TextureAspect::All,
-        },
-        &renderer.atlas_clear_scratch[..byte_count],
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(rect.width as u32 * 4),
-            rows_per_image: None,
-        },
-        Extent3d {
-            width: rect.width as u32,
-            height: rect.height as u32,
-            depth_or_array_layers: 1,
-        },
-    );
 }
 
 /// Defines the GPU resources and pipelines for rendering.

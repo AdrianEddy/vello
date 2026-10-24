@@ -13,7 +13,8 @@
 use core::ops::RangeInclusive;
 
 use crate::{AtlasId, Resources, Scene};
-use glifo::atlas::{PendingBitmapUpload, PendingClearRect};
+use alloc::vec::Vec;
+use glifo::atlas::PendingBitmapUpload;
 use glifo::renderer::replay_atlas_commands;
 use glifo::{
     AtlasCacher, AtlasSlot, DrawSink, GLYPH_PADDING, Glyph, GlyphAtlas, GlyphCacheConfig,
@@ -22,6 +23,7 @@ use glifo::{
 use peniko::BlendMode;
 use peniko::color::palette::css::BLACK;
 use peniko::color::{AlphaColor, Srgb};
+use vello_common::geometry::RectU16;
 use vello_common::kurbo::{Affine, BezPath, Rect};
 use vello_common::multi_atlas::AtlasConfig;
 use vello_common::paint::{Image, ImageSource, PaintType};
@@ -128,21 +130,17 @@ impl Resources {
         Ok(())
     }
 
-    pub(crate) fn after_render<T, E>(
-        &mut self,
-        backend: &mut T,
-        mut clear_rect: impl FnMut(&mut T, &PendingClearRect) -> Result<(), E>,
-    ) -> Result<(), E> {
+    /// Ages the glyph caches and appends the atlas regions of evicted glyphs to `clear_regions`.
+    pub(crate) fn after_render(&mut self, clear_regions: &mut Vec<(AtlasId, RectU16)>) {
         self.glyph_prep_cache.maintain();
         if let Some(glyph_resources) = self.glyph_resources.as_mut() {
             glyph_resources.maintain(&mut self.image_cache);
-            // TODO: A clear error drops pending clears after their slots were deallocated.
             for rect in glyph_resources.glyph_atlas.drain_pending_clear_rects() {
-                clear_rect(backend, &rect)?;
+                let region =
+                    RectU16::new(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
+                clear_regions.push((AtlasId::new(rect.page_index), region));
             }
         }
-
-        Ok(())
     }
 }
 
@@ -368,5 +366,57 @@ impl glifo::GlyphRenderer for Scene {
     fn atlas_paint_transform(&self, _atlas_slot: &AtlasSlot) -> Affine {
         let padding = GLYPH_PADDING as f64;
         Affine::translate((-padding, -padding))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glifo::{FontEmbolden, GlyphCacheKey, RasterMetrics};
+
+    #[test]
+    fn evicted_glyph_regions_include_padding() {
+        let mut resources = Resources::new(AtlasConfig::default());
+        resources.ensure_glyph_resources();
+        let key = GlyphCacheKey::new(
+            0,
+            0,
+            0,
+            12.0,
+            false,
+            0.0,
+            BLACK,
+            0,
+            FontEmbolden::default(),
+            &[],
+        );
+        let metrics = RasterMetrics {
+            width: 5,
+            height: 7,
+            bearing_x: 0,
+            bearing_y: 0,
+        };
+        let glyph_atlas = &mut resources.glyph_resources.as_mut().unwrap().glyph_atlas;
+        let slot = glyph_atlas
+            .insert_entry(&mut resources.image_cache, key, metrics)
+            .unwrap();
+        let allocation = resources.image_cache.get(slot.image_id).unwrap();
+        let [x, y] = allocation.offset;
+        let expected = RectU16::new(x, y, x + allocation.width, y + allocation.height);
+        assert_eq!(
+            (expected.width(), expected.height()),
+            (5 + 2 * GLYPH_PADDING, 7 + 2 * GLYPH_PADDING),
+            "premise: the allocation includes the padding"
+        );
+        let atlas_id = allocation.atlas_id;
+
+        let config = GlyphCacheConfig::default();
+        let mut regions = Vec::new();
+        for _ in 0..config.max_entry_age + config.eviction_frequency {
+            resources.after_render(&mut regions);
+        }
+
+        assert_eq!(regions, [(atlas_id, expected)]);
+        assert!(resources.image_cache.get(slot.image_id).is_none(), "freed");
     }
 }
